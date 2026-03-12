@@ -8,7 +8,7 @@
 #define SCREEN_H           172
 #define COUNTER_H          20
 #define FEATURED_H         64
-#define COMPACT_ROW_H      18
+#define COMPACT_ROW_H      14
 #define DOT_SIZE           6
 
 /* Accent colors per notification slot (1:1 mapping, max 8) */
