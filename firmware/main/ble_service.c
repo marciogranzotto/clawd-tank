@@ -102,7 +102,11 @@ static int notification_write_cb(uint16_t conn_handle, uint16_t attr_handle,
 
     char buf[513];
     uint16_t copied;
-    ble_hs_mbuf_to_flat(ctxt->om, buf, len, &copied);
+    int rc = ble_hs_mbuf_to_flat(ctxt->om, buf, len, &copied);
+    if (rc != 0) {
+        ESP_LOGW(TAG, "mbuf_to_flat failed: %d", rc);
+        return BLE_ATT_ERR_UNLIKELY;
+    }
     buf[copied] = '\0';
 
     ESP_LOGD(TAG, "BLE write (%d bytes): %s", copied, buf);
@@ -134,12 +138,16 @@ static void start_advertising(void) {
     fields.name = (uint8_t *)"Clawd Tank";
     fields.name_len = 10;
     fields.name_is_complete = 1;
-    ble_gap_adv_set_fields(&fields);
+    int rc = ble_gap_adv_set_fields(&fields);
+    if (rc != 0) {
+        ESP_LOGW(TAG, "Failed to set adv fields: %d", rc);
+        return;
+    }
 
     adv_params.conn_mode = BLE_GAP_CONN_MODE_UND;
     adv_params.disc_mode = BLE_GAP_DISC_MODE_GEN;
-    int rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, BLE_HS_FOREVER,
-                               &adv_params, ble_gap_event_cb, NULL);
+    rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, BLE_HS_FOREVER,
+                           &adv_params, ble_gap_event_cb, NULL);
     if (rc != 0) {
         ESP_LOGW(TAG, "Failed to start advertising: %d", rc);
     }
@@ -177,6 +185,11 @@ static int ble_gap_event_cb(struct ble_gap_event *event, void *arg) {
 }
 
 static void ble_on_sync(void) {
+    int rc = ble_hs_util_ensure_addr(0);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "Failed to ensure address: %d", rc);
+        return;
+    }
     ESP_LOGI(TAG, "BLE synced, starting advertising as 'Clawd Tank'");
     start_advertising();
 }
@@ -192,12 +205,24 @@ void ble_service_init(QueueHandle_t evt_queue) {
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(nimble_port_init());
 
-    ble_svc_gap_device_name_set("Clawd Tank");
+    int rc = ble_svc_gap_device_name_set("Clawd Tank");
+    if (rc != 0) {
+        ESP_LOGW(TAG, "Failed to set GAP device name: %d", rc);
+    }
+
     ble_svc_gap_init();
     ble_svc_gatt_init();
 
-    ble_gatts_count_cfg(gatt_svcs);
-    ble_gatts_add_svcs(gatt_svcs);
+    rc = ble_gatts_count_cfg(gatt_svcs);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "GATT count_cfg failed: %d", rc);
+        abort();
+    }
+    rc = ble_gatts_add_svcs(gatt_svcs);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "GATT add_svcs failed: %d", rc);
+        abort();
+    }
 
     ble_hs_cfg.sync_cb = ble_on_sync;
 
