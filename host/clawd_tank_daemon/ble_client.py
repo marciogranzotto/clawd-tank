@@ -16,10 +16,11 @@ SCAN_INTERVAL_SECS = 5
 class ClawdBleClient:
     """Manages BLE connection to the Clawd Tank ESP32 device."""
 
-    def __init__(self):
+    def __init__(self, on_disconnect_cb=None):
         self._client: BleakClient | None = None
         self._lock = asyncio.Lock()
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._on_disconnect_cb = on_disconnect_cb
 
     @property
     def is_connected(self) -> bool:
@@ -58,6 +59,11 @@ class ClawdBleClient:
             self._loop.call_soon_threadsafe(self._clear_client)
         else:
             self._clear_client()
+        if self._on_disconnect_cb:
+            if self._loop is not None and self._loop.is_running():
+                self._loop.call_soon_threadsafe(self._on_disconnect_cb)
+            else:
+                self._on_disconnect_cb()
 
     def _clear_client(self) -> None:
         self._client = None

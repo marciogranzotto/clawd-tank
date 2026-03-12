@@ -7,6 +7,7 @@ import os
 import signal
 import sys
 from pathlib import Path
+from typing import Optional, Protocol, runtime_checkable
 
 from .ble_client import ClawdBleClient
 from .protocol import daemon_message_to_ble_payload
@@ -16,6 +17,12 @@ logger = logging.getLogger("clawd-tank")
 
 PID_PATH = Path.home() / ".clawd-tank" / "daemon.pid"
 LOCK_PATH = Path.home() / ".clawd-tank" / "daemon.lock"
+
+
+@runtime_checkable
+class DaemonObserver(Protocol):
+    def on_connection_change(self, connected: bool) -> None: ...
+    def on_notification_change(self, count: int) -> None: ...
 
 
 def _acquire_lock() -> int:
@@ -32,14 +39,16 @@ def _acquire_lock() -> int:
 
 
 class ClawdDaemon:
-    def __init__(self):
-        self._ble = ClawdBleClient()
+    def __init__(self, observer: Optional["DaemonObserver"] = None, headless: bool = True):
+        self._ble = ClawdBleClient(on_disconnect_cb=self._on_ble_disconnect)
         self._socket = SocketServer(on_message=self._handle_message)
         self._active_notifications: dict[str, dict] = {}
         self._pending_queue: asyncio.Queue[dict] = asyncio.Queue()
         self._running = True
         self._shutdown_event = asyncio.Event()
         self._lock_fd: int | None = None
+        self._observer = observer
+        self._headless = headless
 
     async def _handle_message(self, msg: dict) -> None:
         """Handle a message from clawd-tank-notify via the socket."""
@@ -52,6 +61,9 @@ class ClawdDaemon:
             self._active_notifications.pop(session_id, None)
 
         await self._pending_queue.put(msg)
+
+        if self._observer:
+            self._observer.on_notification_change(len(self._active_notifications))
 
     async def _replay_active(self) -> None:
         """Replay all active notifications after reconnect."""
@@ -88,6 +100,11 @@ class ClawdDaemon:
             os.close(self._lock_fd)
             self._lock_fd = None
 
+    def _on_ble_disconnect(self) -> None:
+        """Called by BLE client on disconnect."""
+        if self._observer:
+            self._observer.on_connection_change(False)
+
     async def _ble_sender(self) -> None:
         """Process pending messages and send them over BLE."""
         while self._running:
@@ -101,11 +118,18 @@ class ClawdDaemon:
                 logger.error("Skipping unknown event: %s", msg.get("event"))
                 continue
 
+            was_connected = self._ble.is_connected
             await self._ble.ensure_connected()
+            if not was_connected and self._ble.is_connected and self._observer:
+                self._observer.on_connection_change(True)
+
             success = await self._ble.write_notification(payload)
 
             if not success:
+                was_connected = self._ble.is_connected
                 await self._ble.ensure_connected()
+                if not was_connected and self._ble.is_connected and self._observer:
+                    self._observer.on_connection_change(True)
                 await self._replay_active()
 
     async def run(self) -> None:
@@ -118,9 +142,10 @@ class ClawdDaemon:
         self._lock_fd = _acquire_lock()
         self._write_pid()
 
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, lambda: asyncio.create_task(self._shutdown()))
+        if self._headless:
+            loop = asyncio.get_running_loop()
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                loop.add_signal_handler(sig, lambda: asyncio.create_task(self._shutdown()))
 
         await self._socket.start()
 
