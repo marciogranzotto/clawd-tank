@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Clawd Alert Animation</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #1a1a2e; color: #eee; font-family: monospace; padding: 24px; }
+h1 { font-size: 18px; margin-bottom: 4px; }
+.subtitle { font-size: 11px; color: #666; margin-bottom: 20px; }
+h2 { font-size: 13px; color: #aaa; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 1px; }
+
+.frames-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
+.frame-card {
+  text-align: center; padding: 8px; border: 2px solid #333; border-radius: 6px;
+  background: #16162a; cursor: pointer; transition: border-color 0.2s;
+}
+.frame-card.active { border-color: #ff6b2b; }
+.frame-card:hover { border-color: #555; }
+.frame-card canvas { image-rendering: pixelated; display: block; margin: 0 auto 6px; }
+.frame-label { font-size: 11px; color: #ccc; margin-bottom: 2px; }
+.frame-desc { font-size: 10px; color: #666; max-width: 128px; line-height: 1.3; }
+
+.preview-section { display: flex; align-items: flex-start; gap: 24px; margin-bottom: 24px; }
+.preview-box { text-align: center; }
+.preview-box canvas { image-rendering: pixelated; border: 1px solid #444; }
+.preview-label { font-size: 11px; color: #888; margin-top: 6px; }
+
+.controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.btn {
+  padding: 6px 14px; background: #2a2a4e; color: #eee; border: 1px solid #444;
+  border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 12px;
+}
+.btn:hover { background: #3a3a5e; }
+.btn.primary { background: #ff6b2b; border-color: #ff6b2b; color: #fff; }
+.btn.primary:hover { background: #ff8844; }
+.btn.active { background: #3a5a2e; border-color: #5a5; }
+label { font-size: 11px; color: #aaa; }
+#fps-input {
+  width: 40px; background: #222; color: #eee; border: 1px solid #444;
+  border-radius: 3px; padding: 3px 5px; font-family: monospace; font-size: 12px; text-align: center;
+}
+</style>
+</head>
+<body>
+
+<h1>Clawd Alert Animation</h1>
+<p class="subtitle">6 frames &mdash; Clawd glances right when a notification arrives, "!" appears above head</p>
+
+<h2>Frames</h2>
+<div class="frames-row" id="frames-row"></div>
+
+<h2>Preview</h2>
+<div class="preview-section">
+  <div class="preview-box">
+    <canvas id="preview-3x" width="192" height="192"></canvas>
+    <div class="preview-label">3x (192&times;192)</div>
+  </div>
+  <div class="preview-box">
+    <canvas id="preview-1x" width="64" height="64"></canvas>
+    <div class="preview-label">1x (64&times;64)</div>
+  </div>
+</div>
+
+<div class="controls">
+  <button class="btn" id="play-btn" onclick="togglePlay()">Play</button>
+  <label>FPS:</label>
+  <input type="number" id="fps-input" value="6" min="1" max="30">
+  <div style="width:1px;height:24px;background:#444;margin:0 4px;"></div>
+  <button class="btn primary" onclick="exportPNGs()">Export PNGs</button>
+</div>
+
+<script>
+const W = 64, H = 64;
+const BG = '#1a1a2e';
+const BODY_COLOR = '#ff6b2b';
+const EYE_COLOR = '#000000';
+const ALERT_COLOR = '#ffdd57';
+
+// Clawd base dimensions (from overlay reference)
+const BODY = { x: 18, y: 23, w: 28, h: 18 };
+const EYES = { left: { x: 25, y: 28 }, right: { x: 37, y: 28 }, w: 2, h: 2 };
+const LEGS = { positions: [21, 26, 36, 41], y: 41, w: 2, h: 5 };
+const CLAWS = { left: { x: 14, y: 27 }, right: { x: 46, y: 27 }, w: 4, h: 4 };
+
+function drawClawd(ctx, opts = {}) {
+  const dx = opts.dx || 0;
+  const dy = opts.dy || 0;
+  const eyeDx = opts.eyeDx || 0;
+  const legH = opts.legH !== undefined ? opts.legH : LEGS.h;
+
+  // Background
+  ctx.fillStyle = BG;
+  ctx.fillRect(0, 0, W, H);
+
+  // Body
+  ctx.fillStyle = BODY_COLOR;
+  ctx.fillRect(BODY.x + dx, BODY.y + dy, BODY.w, BODY.h);
+
+  // Left claw
+  ctx.fillRect(CLAWS.left.x + dx, CLAWS.left.y + dy, CLAWS.w, CLAWS.h);
+
+  // Right claw
+  ctx.fillRect(CLAWS.right.x + dx, CLAWS.right.y + dy, CLAWS.w, CLAWS.h);
+
+  // Legs
+  LEGS.positions.forEach(lx => {
+    ctx.fillRect(lx + dx, LEGS.y + dy, LEGS.w, legH);
+  });
+
+  // Eyes
+  ctx.fillStyle = EYE_COLOR;
+  ctx.fillRect(EYES.left.x + dx + eyeDx, EYES.left.y + dy, EYES.w, EYES.h);
+  ctx.fillRect(EYES.right.x + dx + eyeDx, EYES.right.y + dy, EYES.w, EYES.h);
+}
+
+function drawExclamation(ctx, dx) {
+  // "!" mark: 2 wide x 4 tall, positioned above head
+  // Body center when leaned: BODY.x + dx + BODY.w/2 = 18+1+14 = 33
+  // Center the "!" (2 wide) at x=32
+  const ex = 32;
+  const ey = 16;
+
+  ctx.fillStyle = ALERT_COLOR;
+  // Stick (top 2 rows)
+  ctx.fillRect(ex, ey, 2, 2);
+  // Dot (row 3, after 1px gap)
+  ctx.fillRect(ex, ey + 3, 2, 1);
+}
+
+// Frame definitions
+const frameConfigs = [
+  { name: 'Frame 1', desc: 'Neutral pose', draw: (ctx) => drawClawd(ctx) },
+  { name: 'Frame 2', desc: 'Eyes shift right 1px', draw: (ctx) => drawClawd(ctx, { eyeDx: 1 }) },
+  { name: 'Frame 3', desc: 'Body leans right 1px', draw: (ctx) => { drawClawd(ctx, { dx: 1, eyeDx: 1 }); } },
+  { name: 'Frame 4', desc: '"!" appears above head', draw: (ctx) => { drawClawd(ctx, { dx: 1, eyeDx: 1 }); drawExclamation(ctx, 1); } },
+  { name: 'Frame 5', desc: 'Hold alert pose', draw: (ctx) => { drawClawd(ctx, { dx: 1, eyeDx: 1 }); drawExclamation(ctx, 1); } },
+  { name: 'Frame 6', desc: '"!" fades, body leaning', draw: (ctx) => { drawClawd(ctx, { dx: 1, eyeDx: 1 }); } },
+];
+
+// Create frame canvases
+const frameCanvases = [];
+const framesRow = document.getElementById('frames-row');
+
+frameConfigs.forEach((config, i) => {
+  const card = document.createElement('div');
+  card.className = 'frame-card' + (i === 0 ? ' active' : '');
+  card.onclick = () => selectFrame(i);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  canvas.style.width = '128px';
+  canvas.style.height = '128px';
+
+  const label = document.createElement('div');
+  label.className = 'frame-label';
+  label.textContent = config.name;
+
+  const desc = document.createElement('div');
+  desc.className = 'frame-desc';
+  desc.textContent = config.desc;
+
+  card.appendChild(canvas);
+  card.appendChild(label);
+  card.appendChild(desc);
+  framesRow.appendChild(card);
+
+  frameCanvases.push(canvas);
+
+  // Draw frame
+  const ctx = canvas.getContext('2d');
+  config.draw(ctx);
+});
+
+// Preview canvases
+const preview3x = document.getElementById('preview-3x');
+const preview1x = document.getElementById('preview-1x');
+let currentFrame = 0;
+let isPlaying = false;
+let playInterval = null;
+
+function selectFrame(idx) {
+  currentFrame = idx;
+  document.querySelectorAll('.frame-card').forEach((el, i) => {
+    el.classList.toggle('active', i === idx);
+  });
+  renderPreview();
+}
+
+function renderPreview() {
+  // 1x preview
+  const ctx1 = preview1x.getContext('2d');
+  ctx1.clearRect(0, 0, W, H);
+  ctx1.drawImage(frameCanvases[currentFrame], 0, 0);
+
+  // 3x preview
+  const ctx3 = preview3x.getContext('2d');
+  ctx3.imageSmoothingEnabled = false;
+  ctx3.clearRect(0, 0, 192, 192);
+  ctx3.drawImage(frameCanvases[currentFrame], 0, 0, 192, 192);
+}
+
+function togglePlay() {
+  isPlaying = !isPlaying;
+  const btn = document.getElementById('play-btn');
+  if (isPlaying) {
+    btn.textContent = 'Pause';
+    btn.classList.add('active');
+    startPlayback();
+  } else {
+    btn.textContent = 'Play';
+    btn.classList.remove('active');
+    stopPlayback();
+  }
+}
+
+function startPlayback() {
+  stopPlayback();
+  const fps = parseInt(document.getElementById('fps-input').value) || 6;
+  playInterval = setInterval(() => {
+    currentFrame = (currentFrame + 1) % frameConfigs.length;
+    document.querySelectorAll('.frame-card').forEach((el, i) => {
+      el.classList.toggle('active', i === currentFrame);
+    });
+    renderPreview();
+  }, 1000 / fps);
+}
+
+function stopPlayback() {
+  if (playInterval) { clearInterval(playInterval); playInterval = null; }
+}
+
+document.getElementById('fps-input').addEventListener('change', () => {
+  if (isPlaying) startPlayback();
+});
+
+function exportPNGs() {
+  frameCanvases.forEach((canvas, i) => {
+    setTimeout(() => {
+      canvas.toBlob((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `frame_${String(i).padStart(2, '0')}.png`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }, 'image/png');
+    }, i * 200);
+  });
+}
+
+// Initialize preview
+renderPreview();
+</script>
+</body>
+</html>
