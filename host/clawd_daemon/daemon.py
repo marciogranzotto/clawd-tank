@@ -63,6 +63,7 @@ class ClawdDaemon:
         await self._ble.write_notification(clear_payload)
         await self._ble.disconnect()
         await self._socket.stop()
+        self._remove_pid()
 
     async def _ble_sender(self) -> None:
         """Process pending messages and send them over BLE."""

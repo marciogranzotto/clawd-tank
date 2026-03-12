@@ -1,7 +1,6 @@
 """Message format conversion between Claude Code hooks, daemon, and BLE."""
 
 import json
-import os
 from pathlib import Path
 from typing import Optional
 
