@@ -148,8 +148,8 @@ canvas#editor { cursor: crosshair; image-rendering: pixelated; border: 1px solid
     <div id="frame-list"></div>
   </div>
   <div id="frame-buttons">
-    <button class="tb-btn" onclick="addFrame()">+ Duplicate</button>
-    <button class="tb-btn" onclick="copyFrame()">+ Blank</button>
+    <button class="tb-btn" onclick="duplicateFrame()">+ Duplicate</button>
+    <button class="tb-btn" onclick="addBlankFrame()">+ Blank</button>
     <button class="tb-btn" onclick="deleteFrame()">Delete</button>
   </div>
 </div>
@@ -407,7 +407,13 @@ editorCanvas.addEventListener('mousedown', (e) => {
     return;
   }
 
-  if (currentTool === 'fill' || currentTool === 'pick') {
+  if (currentTool === 'pick') {
+    applyTool(x, y);
+    render();
+    return;
+  }
+
+  if (currentTool === 'fill') {
     saveUndoState();
     applyTool(x, y);
     render();
@@ -526,7 +532,7 @@ document.getElementById('grid-toggle').addEventListener('change', (e) => {
 });
 
 // ---- Frame Management ----
-function addFrame() {
+function duplicateFrame() {
   frames.push(cloneGrid(currentGrid()));
   currentFrameIdx = frames.length - 1;
   undoStack = [];
@@ -535,7 +541,7 @@ function addFrame() {
   render();
 }
 
-function copyFrame() {
+function addBlankFrame() {
   frames.push(createEmptyGrid());
   currentFrameIdx = frames.length - 1;
   undoStack = [];
@@ -569,6 +575,11 @@ function moveFrame(idx, dir) {
   if (currentFrameIdx === idx) currentFrameIdx = newIdx;
   else if (currentFrameIdx === newIdx) currentFrameIdx = idx;
   updateFrameList();
+}
+
+function highlightActiveFrame() {
+  const thumbs = document.querySelectorAll('.frame-thumb');
+  thumbs.forEach((el, i) => el.classList.toggle('active', i === currentFrameIdx));
 }
 
 function updateFrameList() {
@@ -649,7 +660,7 @@ function startPlayback() {
   playInterval = setInterval(() => {
     currentFrameIdx = (currentFrameIdx + 1) % frames.length;
     render();
-    updateFrameList();
+    highlightActiveFrame();
   }, 1000 / fps);
 }
 
@@ -702,14 +713,16 @@ function exportAllPNG() {
       }
     }
 
-    tmpCanvas.toBlob((blob) => {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `frame_${String(i).padStart(2, '0')}.png`;
-      a.click();
-      URL.revokeObjectURL(url);
-    }, 'image/png');
+    setTimeout(() => {
+      tmpCanvas.toBlob((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `frame_${String(i).padStart(2, '0')}.png`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }, 'image/png');
+    }, i * 200);
   });
 }
 

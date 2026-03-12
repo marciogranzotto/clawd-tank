@@ -14,6 +14,7 @@ Example:
 
 import argparse
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -66,7 +67,7 @@ def convert_png_to_rgb565(image_path):
     return pixels, width, height
 
 
-def format_pixel_array(pixels, name, indent="    "):
+def format_pixel_array(pixels, indent="    "):
     """Format pixel data as a C array."""
     lines = []
     for i in range(0, len(pixels), 16):
@@ -102,7 +103,7 @@ def generate_header(frames_data, prefix, width, height):
     # Individual frame arrays
     for i, pixels in enumerate(frames_data):
         lines.append(f"static const uint16_t {prefix}_frame_{i:02d}[{width * height}] = {{")
-        lines.append(format_pixel_array(pixels, prefix))
+        lines.append(format_pixel_array(pixels))
         lines.append("};")
         lines.append("")
 
@@ -129,6 +130,11 @@ def main():
         "--name", required=True, help="Array name prefix (e.g., 'idle')"
     )
     args = parser.parse_args()
+
+    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', args.name):
+        print(f"Error: '{args.name}' is not a valid C identifier.")
+        print("  Must match: ^[a-zA-Z_][a-zA-Z0-9_]*$")
+        sys.exit(1)
 
     input_dir = Path(args.input_dir)
     if not input_dir.is_dir():
