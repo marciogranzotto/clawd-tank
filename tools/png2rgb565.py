@@ -37,13 +37,15 @@ def rgb_to_565(r, g, b):
     return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
 
 
-def is_transparent(r, g, b, a):
-    """Check if a pixel should be treated as transparent."""
-    if a < 128:
-        return True
-    if (r, g, b) == BG_COLOR:
-        return True
-    return False
+def blend_over_bg(r, g, b, a):
+    """Alpha-composite an RGBA pixel over the background color.
+    Semi-transparent pixels (e.g. glows, shadows) become opaque blended colors
+    instead of being discarded."""
+    alpha = a / 255.0
+    br = int(r * alpha + BG_COLOR[0] * (1 - alpha))
+    bg = int(g * alpha + BG_COLOR[1] * (1 - alpha))
+    bb = int(b * alpha + BG_COLOR[2] * (1 - alpha))
+    return br, bg, bb
 
 
 def convert_png_to_rgb565(image_path):
@@ -55,8 +57,16 @@ def convert_png_to_rgb565(image_path):
     for y in range(height):
         for x in range(width):
             r, g, b, a = img.getpixel((x, y))
-            if is_transparent(r, g, b, a):
+            if a == 0 or (a == 255 and (r, g, b) == BG_COLOR):
+                # Fully transparent or exact background match
                 pixels.append(TRANSPARENT_KEY)
+            elif a < 255:
+                # Semi-transparent: composite over background
+                cr, cg, cb = blend_over_bg(r, g, b, a)
+                val = rgb_to_565(cr, cg, cb)
+                if val == TRANSPARENT_KEY:
+                    val = TRANSPARENT_KEY + 1
+                pixels.append(val)
             else:
                 val = rgb_to_565(r, g, b)
                 # Avoid accidental collision with transparent key

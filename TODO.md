@@ -8,8 +8,19 @@ BLE advertising works, notifications can be sent and dismissed via BLE GATT writ
 Clawd sprite animations and notification card UI are implemented.
 NVS-backed config store supports brightness and sleep timeout with BLE read/write.
 macOS menu bar app provides daemon control and device configuration UI.
+All 5 animated SVGs converted to full sprite frame sequences and integrated into scene.c:
+- idle: 96 frames, 135×135px, 6fps (frame buffer cap raised from 48→96)
+- alert: 40 frames, 135×135px, 10fps
+- happy: 20 frames, 120×120px, 10fps
+- sleeping: 36 frames, 120×120px, 6fps
+- disconnected: 36 frames, 150×120px, 6fps
+All HAS_*_SPRITE conditional guards removed; sprites included unconditionally.
 
 ---
+
+## Sprites & Animations (Major)
+
+- [x] **All 5 SVG animations converted to C sprite headers** — idle (96f/135×135), alert (40f/135×135), happy (20f/120×120), sleeping (36f/120×120), disconnected (36f/150×120). Frame buffer cap raised from 48→96. All `#if HAS_*_SPRITE` guards removed from `scene.c`. Alert and happy remain non-looping (one-shot). Idle, sleeping, disconnected loop.
 
 ## UI/UX Design (Major)
 
@@ -41,5 +52,4 @@ macOS menu bar app provides daemon control and device configuration UI.
 
 - Physical button interaction (dismiss notifications from the device)
 - Multiple host device support (pairing with more than one Mac)
-- Notification sound/haptic feedback
 - OTA firmware updates over WiFi

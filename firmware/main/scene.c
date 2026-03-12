@@ -12,35 +12,10 @@
 #endif
 
 #include "assets/sprite_idle.h"
-
-#ifdef ALERT_FRAMES_H
-/* already included */
-#else
 #include "assets/sprite_alert.h"
-#endif
-
-#ifdef HAPPY_FRAMES_H
-/* already included */
-#else
 #include "assets/sprite_happy.h"
-#endif
-
-/* Sleeping and disconnected sprites may not exist yet */
-#if __has_include("assets/sprite_sleeping.h")
 #include "assets/sprite_sleeping.h"
-#define HAS_SLEEPING_SPRITE 1
-#else
-#define HAS_SLEEPING_SPRITE 0
-#define SLEEPING_FRAME_COUNT 0
-#endif
-
-#if __has_include("assets/sprite_disconnected.h")
 #include "assets/sprite_disconnected.h"
-#define HAS_DISCONNECTED_SPRITE 1
-#else
-#define HAS_DISCONNECTED_SPRITE 0
-#define DISCONNECTED_FRAME_COUNT 0
-#endif
 
 /* ---------- Constants ---------- */
 
@@ -54,11 +29,11 @@
 #define TRANSPARENT_KEY    0x18C5
 
 /* Frame timing in ms per animation */
-#define IDLE_FRAME_MS      (1000 / 6)
-#define ALERT_FRAME_MS     (1000 / 8)
-#define HAPPY_FRAME_MS     (1000 / 8)
-#define SLEEPING_FRAME_MS  (1000 / 4)
-#define DISCONN_FRAME_MS   (1000 / 6)
+#define IDLE_FRAME_MS      (1000 / 6)   /* 167ms @ 6fps */
+#define ALERT_FRAME_MS     (1000 / 10)  /* 100ms @ 10fps */
+#define HAPPY_FRAME_MS     (1000 / 10)  /* 100ms @ 10fps */
+#define SLEEPING_FRAME_MS  (1000 / 6)   /* 167ms @ 6fps */
+#define DISCONN_FRAME_MS   (1000 / 6)   /* 167ms @ 6fps */
 
 /* ---------- Animation metadata ---------- */
 
@@ -67,6 +42,9 @@ typedef struct {
     int frame_count;
     int frame_ms;
     bool looping;
+    int width;    /* sprite width in pixels (0 = use SPRITE_W) */
+    int height;   /* sprite height in pixels (0 = use SPRITE_H) */
+    int y_offset; /* LVGL bottom-align y offset (accounts for canvas padding below feet) */
 } anim_def_t;
 
 static const anim_def_t anim_defs[] = {
@@ -75,49 +53,46 @@ static const anim_def_t anim_defs[] = {
         .frame_count = IDLE_FRAME_COUNT,
         .frame_ms = IDLE_FRAME_MS,
         .looping = true,
+        .width = IDLE_WIDTH,
+        .height = IDLE_HEIGHT,
+        .y_offset = 8,
     },
     [CLAWD_ANIM_ALERT] = {
         .frames = alert_frames,
         .frame_count = ALERT_FRAME_COUNT,
         .frame_ms = ALERT_FRAME_MS,
         .looping = false,
+        .width = ALERT_WIDTH,
+        .height = ALERT_HEIGHT,
+        .y_offset = 8,
     },
     [CLAWD_ANIM_HAPPY] = {
         .frames = happy_frames,
         .frame_count = HAPPY_FRAME_COUNT,
         .frame_ms = HAPPY_FRAME_MS,
         .looping = false,
+        .width = HAPPY_WIDTH,
+        .height = HAPPY_HEIGHT,
+        .y_offset = 28,
     },
-#if HAS_SLEEPING_SPRITE
     [CLAWD_ANIM_SLEEPING] = {
         .frames = sleeping_frames,
         .frame_count = SLEEPING_FRAME_COUNT,
         .frame_ms = SLEEPING_FRAME_MS,
         .looping = true,
+        .width = SLEEPING_WIDTH,
+        .height = SLEEPING_HEIGHT,
+        .y_offset = 8,
     },
-#else
-    [CLAWD_ANIM_SLEEPING] = {
-        .frames = idle_frames,
-        .frame_count = IDLE_FRAME_COUNT,
-        .frame_ms = SLEEPING_FRAME_MS,
-        .looping = true,
-    },
-#endif
-#if HAS_DISCONNECTED_SPRITE
     [CLAWD_ANIM_DISCONNECTED] = {
         .frames = disconnected_frames,
         .frame_count = DISCONNECTED_FRAME_COUNT,
         .frame_ms = DISCONN_FRAME_MS,
         .looping = true,
+        .width = DISCONNECTED_WIDTH,
+        .height = DISCONNECTED_HEIGHT,
+        .y_offset = 8,
     },
-#else
-    [CLAWD_ANIM_DISCONNECTED] = {
-        .frames = idle_frames,
-        .frame_count = IDLE_FRAME_COUNT,
-        .frame_ms = DISCONN_FRAME_MS,
-        .looping = true,
-    },
-#endif
 };
 
 /* ---------- Star config ---------- */
@@ -151,8 +126,8 @@ struct scene_t {
 
     /* Clawd sprite */
     lv_obj_t *sprite_img;
-    lv_image_dsc_t frame_dscs[16]; /* max frames across all anims */
-    uint8_t *frame_bufs[16];       /* converted ARGB8565 buffers (PSRAM) */
+    lv_image_dsc_t frame_dscs[96]; /* max frames across all anims */
+    uint8_t *frame_bufs[96];       /* converted ARGB8888 buffers (PSRAM) */
     clawd_anim_id_t cur_anim;
     int frame_idx;
     uint32_t last_frame_tick;
@@ -171,7 +146,7 @@ struct scene_t {
 
 static void free_frame_bufs(scene_t *s)
 {
-    for (int i = 0; i < 16; i++) {
+    for (int i = 0; i < 96; i++) {
         if (s->frame_bufs[i]) {
             free(s->frame_bufs[i]);
             s->frame_bufs[i] = NULL;
@@ -183,9 +158,12 @@ static void build_frame_dscs(scene_t *s, const anim_def_t *def)
 {
     free_frame_bufs(s);
 
-    for (int i = 0; i < def->frame_count && i < 16; i++) {
+    int w = def->width  ? def->width  : SPRITE_W;
+    int h = def->height ? def->height : SPRITE_H;
+
+    for (int i = 0; i < def->frame_count && i < 96; i++) {
         /* Convert RGB565 → ARGB8888, replacing chroma key with alpha=0 */
-        int pixel_count = SPRITE_W * SPRITE_H;
+        int pixel_count = w * h;
         size_t buf_size = pixel_count * 4;
         uint8_t *buf = malloc(buf_size);
         if (!buf) continue;
@@ -211,10 +189,10 @@ static void build_frame_dscs(scene_t *s, const anim_def_t *def)
 
         lv_image_dsc_t *d = &s->frame_dscs[i];
         d->header.magic = LV_IMAGE_HEADER_MAGIC;
-        d->header.w = SPRITE_W;
-        d->header.h = SPRITE_H;
+        d->header.w = w;
+        d->header.h = h;
         d->header.cf = LV_COLOR_FORMAT_ARGB8888;
-        d->header.stride = SPRITE_W * 4;
+        d->header.stride = w * 4;
         d->data = buf;
         d->data_size = buf_size;
     }
@@ -298,9 +276,9 @@ scene_t *scene_create(lv_obj_t *parent)
         lv_obj_set_style_bg_color(tuft, lv_color_hex(0x3d6a3d), 0);
     }
 
-    /* Clawd sprite image — centered above grass */
+    /* Clawd sprite image — y_offset per animation pushes feet into grass */
     s->sprite_img = lv_image_create(s->container);
-    lv_obj_align(s->sprite_img, LV_ALIGN_BOTTOM_MID, 0, -GRASS_HEIGHT);
+    lv_obj_align(s->sprite_img, LV_ALIGN_BOTTOM_MID, 0, anim_defs[CLAWD_ANIM_IDLE].y_offset);
     lv_image_set_inner_align(s->sprite_img, LV_IMAGE_ALIGN_CENTER);
 
     /* Set up idle animation as default */
@@ -415,6 +393,9 @@ void scene_set_clawd_anim(scene_t *scene, clawd_anim_id_t anim)
     build_frame_dscs(scene, def);
     apply_sprite_frame(scene);
 
+    /* Re-align sprite for this animation's ground offset */
+    lv_obj_align(scene->sprite_img, LV_ALIGN_BOTTOM_MID, 0, def->y_offset);
+
     /* Disconnected state: desaturate + show no-connection label */
     if (anim == CLAWD_ANIM_DISCONNECTED) {
         lv_obj_set_style_image_recolor(scene->sprite_img, lv_color_hex(0x888888), 0);
@@ -473,6 +454,10 @@ void scene_tick(scene_t *scene)
         } else {
             if (scene->frame_idx < def->frame_count - 1) {
                 scene->frame_idx++;
+            } else {
+                /* Oneshot finished — auto-return to idle */
+                scene_set_clawd_anim(scene, CLAWD_ANIM_IDLE);
+                return;
             }
         }
         apply_sprite_frame(scene);

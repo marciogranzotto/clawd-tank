@@ -226,6 +226,12 @@ static void handle_sdl_events(void)
                 printf("[key] screenshot saved\n");
                 break;
             }
+            case SDLK_z: {
+                /* Force sleeping state by setting timeout to 1ms */
+                ui_manager_set_sleep_timeout(1);
+                printf("[key] sleep\n");
+                break;
+            }
             case SDLK_1: case SDLK_2: case SDLK_3: case SDLK_4:
             case SDLK_5: case SDLK_6: case SDLK_7: case SDLK_8: {
                 /* Dismiss by index — requires tracking, simplified for interactive */
