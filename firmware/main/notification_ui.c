@@ -73,7 +73,7 @@ notification_ui_t *notification_ui_create(lv_obj_t *parent)
     lv_obj_set_style_bg_opa(ui->container, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(ui->container, lv_color_hex(0x0f1320), 0);
 
-    /* Counter label: "▸ N WAITING!" */
+    /* Counter label: "> N WAITING!" */
     ui->counter_label = lv_label_create(ui->container);
     lv_obj_set_style_text_font(ui->counter_label, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(ui->counter_label, lv_color_hex(0xffdd57), 0);
@@ -215,7 +215,7 @@ static void rebuild_display(notification_ui_t *ui)
 
     /* Counter */
     char counter_buf[24];
-    snprintf(counter_buf, sizeof(counter_buf), "\xe2\x96\xb8 %d WAITING!", count);
+    snprintf(counter_buf, sizeof(counter_buf), "> %d WAITING!", count);
     lv_label_set_text(ui->counter_label, counter_buf);
 
     /* Featured card */

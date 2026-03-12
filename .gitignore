@@ -3,7 +3,8 @@
 # ESP-IDF
 bsp/esp-idf/
 .espressif/
-.envrc
+firmware/.envrc
+host/.envrc
 
 # Firmware build artifacts
 firmware/build/
@@ -15,6 +16,7 @@ firmware/dependencies.lock
 # Python
 host/venv/
 host/.venv/
+host/.direnv/
 *.pyc
 __pycache__/
 .pytest_cache/
