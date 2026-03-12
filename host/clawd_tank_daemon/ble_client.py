@@ -1,6 +1,7 @@
 """BLE GATT client for communicating with the Clawd Tank ESP32 device."""
 
 import asyncio
+import json
 import logging
 from bleak import BleakClient, BleakScanner
 
@@ -8,6 +9,7 @@ logger = logging.getLogger("clawd-tank.ble")
 
 SERVICE_UUID = "aecbefd9-98a2-4773-9fed-bb2166daa49a"
 NOTIFICATION_CHR_UUID = "71ffb137-8b7a-47c9-9a7a-4b1b16662d9a"
+CONFIG_CHR_UUID = "e9f6e626-5fca-4201-b80c-4d2b51c40f51"
 SCAN_INTERVAL_SECS = 5
 
 
@@ -83,6 +85,42 @@ class ClawdBleClient:
                 return True
             except Exception as e:
                 logger.error("BLE write failed: %s", e)
+                return False
+
+    async def read_config(self) -> dict:
+        """Read full device config from the config characteristic.
+
+        Returns empty dict if not connected or on error.
+        """
+        async with self._lock:
+            if not self.is_connected:
+                logger.warning("Not connected, cannot read config")
+                return {}
+            try:
+                data = await self._client.read_gatt_char(CONFIG_CHR_UUID)
+                return json.loads(data.decode("utf-8"))
+            except Exception as e:
+                logger.error("Config read failed: %s", e)
+                return {}
+
+    async def write_config(self, payload: str) -> bool:
+        """Write a partial config JSON to the config characteristic.
+
+        Returns True on success, False on failure.
+        """
+        async with self._lock:
+            if not self.is_connected:
+                logger.warning("Not connected, cannot write config")
+                return False
+            try:
+                data = payload.encode("utf-8")
+                await self._client.write_gatt_char(
+                    CONFIG_CHR_UUID, data, response=False
+                )
+                logger.debug("Config write: %s", payload)
+                return True
+            except Exception as e:
+                logger.error("Config write failed: %s", e)
                 return False
 
     async def disconnect(self) -> None:
