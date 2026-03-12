@@ -148,8 +148,8 @@ canvas#editor { cursor: crosshair; image-rendering: pixelated; border: 1px solid
     <div id="frame-list"></div>
   </div>
   <div id="frame-buttons">
-    <button class="tb-btn" onclick="addFrame()">+ Add</button>
-    <button class="tb-btn" onclick="copyFrame()">Copy</button>
+    <button class="tb-btn" onclick="addFrame()">+ Duplicate</button>
+    <button class="tb-btn" onclick="copyFrame()">+ Blank</button>
     <button class="tb-btn" onclick="deleteFrame()">Delete</button>
   </div>
 </div>
@@ -527,7 +527,7 @@ document.getElementById('grid-toggle').addEventListener('change', (e) => {
 
 // ---- Frame Management ----
 function addFrame() {
-  frames.push(createEmptyGrid());
+  frames.push(cloneGrid(currentGrid()));
   currentFrameIdx = frames.length - 1;
   undoStack = [];
   redoStack = [];
@@ -536,7 +536,7 @@ function addFrame() {
 }
 
 function copyFrame() {
-  frames.push(cloneGrid(currentGrid()));
+  frames.push(createEmptyGrid());
   currentFrameIdx = frames.length - 1;
   undoStack = [];
   redoStack = [];
