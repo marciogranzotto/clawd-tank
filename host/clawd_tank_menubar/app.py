@@ -11,7 +11,7 @@ import rumps
 
 from clawd_tank_daemon.daemon import ClawdDaemon, DaemonObserver
 from . import launchd
-from .slider import SliderMenuItem
+from .slider import create_slider_menu_item
 
 logger = logging.getLogger("clawd-tank.menubar")
 
@@ -43,7 +43,7 @@ class ClawdTankApp(rumps.App, DaemonObserver):
         self._subtitle_item.set_callback(None)
 
         # Brightness slider
-        self._brightness_slider = SliderMenuItem.create(
+        self._brightness_slider = create_slider_menu_item(
             "Brightness", min_val=0, max_val=255, initial=102,
             on_change=self._on_brightness_change,
         )
