@@ -84,7 +84,7 @@ notification_ui_t *notification_ui_create(lv_obj_t *parent)
     ui->featured_card = lv_obj_create(ui->container);
     lv_obj_remove_style_all(ui->featured_card);
     lv_obj_set_style_bg_opa(ui->featured_card, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(ui->featured_card, lv_color_hex(0x1a1a2e), 0);
+    lv_obj_set_style_bg_color(ui->featured_card, lv_color_hex(0x2a1a3e), 0);
     lv_obj_set_style_border_width(ui->featured_card, 2, 0);
     lv_obj_set_style_border_color(ui->featured_card, lv_color_hex(accent_colors[0]), 0);
     lv_obj_set_style_radius(ui->featured_card, 3, 0);
@@ -215,7 +215,7 @@ static void rebuild_display(notification_ui_t *ui)
 
     /* Counter */
     char counter_buf[24];
-    snprintf(counter_buf, sizeof(counter_buf), "> %d WAITING!", count);
+    snprintf(counter_buf, sizeof(counter_buf), "\xe2\x96\xb8 %d WAITING!", count);
     lv_label_set_text(ui->counter_label, counter_buf);
 
     /* Featured card */
@@ -260,11 +260,13 @@ static void rebuild_display(notification_ui_t *ui)
     }
     ui->compact_count = 0;
 
-    /* Build compact list (all except featured) */
+    /* Build compact list (all except featured, capped to visible area) */
     int y_pos = COUNTER_H + FEATURED_H + 6;
+    int max_compact_rows = (SCREEN_H - y_pos) / COMPACT_ROW_H;
 
     for (int i = 0; i < count; i++) {
         if (i == fi) continue;
+        if (ui->compact_count >= max_compact_rows) break;
         if (ui->compact_count >= NOTIF_MAX_COUNT) break;
 
         int ci = ui->compact_count;

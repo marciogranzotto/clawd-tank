@@ -318,15 +318,55 @@ scene_t *scene_create(lv_obj_t *parent)
     lv_label_set_text(s->time_label, "");
     lv_obj_add_flag(s->time_label, LV_OBJ_FLAG_HIDDEN);
 
-    /* BLE icon — small circle, upper-right below time */
-    s->ble_icon = lv_obj_create(s->container);
-    lv_obj_remove_style_all(s->ble_icon);
-    lv_obj_set_size(s->ble_icon, 8, 8);
-    lv_obj_align(s->ble_icon, LV_ALIGN_TOP_RIGHT, -8, 26);
-    lv_obj_set_style_bg_opa(s->ble_icon, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(s->ble_icon, lv_color_hex(0x4488ff), 0);
-    lv_obj_set_style_radius(s->ble_icon, 4, 0);
-    lv_obj_add_flag(s->ble_icon, LV_OBJ_FLAG_HIDDEN);
+    /* BLE icon — Bluetooth symbol using a canvas with pixel art */
+    {
+        /* 12x16 pixel-art Bluetooth rune on blue circle background */
+        static const uint8_t bt_bitmap[] = {
+            /* Row 0  */ 0,0,0,0,0,1,0,0,0,0,0,0,
+            /* Row 1  */ 0,0,0,0,0,1,1,0,0,0,0,0,
+            /* Row 2  */ 0,0,0,0,0,1,0,1,0,0,0,0,
+            /* Row 3  */ 0,1,0,0,0,1,0,0,1,0,0,0,
+            /* Row 4  */ 0,0,1,0,0,1,0,1,0,0,0,0,
+            /* Row 5  */ 0,0,0,1,0,1,1,0,0,0,0,0,
+            /* Row 6  */ 0,0,0,0,1,1,0,0,0,0,0,0,
+            /* Row 7  */ 0,0,0,1,0,1,1,0,0,0,0,0,
+            /* Row 8  */ 0,0,1,0,0,1,0,1,0,0,0,0,
+            /* Row 9  */ 0,1,0,0,0,1,0,0,1,0,0,0,
+            /* Row 10 */ 0,0,0,0,0,1,0,1,0,0,0,0,
+            /* Row 11 */ 0,0,0,0,0,1,1,0,0,0,0,0,
+            /* Row 12 */ 0,0,0,0,0,1,0,0,0,0,0,0,
+        };
+        #define BT_W 12
+        #define BT_H 13
+        #define BT_ICON_SIZE 18 /* background circle size */
+
+        s->ble_icon = lv_obj_create(s->container);
+        lv_obj_remove_style_all(s->ble_icon);
+        lv_obj_set_size(s->ble_icon, BT_ICON_SIZE, BT_ICON_SIZE);
+        lv_obj_align(s->ble_icon, LV_ALIGN_TOP_RIGHT, -6, 24);
+        lv_obj_set_style_bg_opa(s->ble_icon, LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_color(s->ble_icon, lv_color_hex(0x2255aa), 0);
+        lv_obj_set_style_radius(s->ble_icon, BT_ICON_SIZE / 2, 0);
+        lv_obj_set_scrollbar_mode(s->ble_icon, LV_SCROLLBAR_MODE_OFF);
+        lv_obj_clear_flag(s->ble_icon, LV_OBJ_FLAG_SCROLLABLE);
+
+        /* Draw white pixels for the Bluetooth rune */
+        int ox = (BT_ICON_SIZE - BT_W) / 2;
+        int oy = (BT_ICON_SIZE - BT_H) / 2;
+        for (int row = 0; row < BT_H; row++) {
+            for (int col = 0; col < BT_W; col++) {
+                if (bt_bitmap[row * BT_W + col]) {
+                    lv_obj_t *px = lv_obj_create(s->ble_icon);
+                    lv_obj_remove_style_all(px);
+                    lv_obj_set_size(px, 1, 1);
+                    lv_obj_set_pos(px, ox + col, oy + row);
+                    lv_obj_set_style_bg_opa(px, LV_OPA_COVER, 0);
+                    lv_obj_set_style_bg_color(px, lv_color_hex(0xffffff), 0);
+                }
+            }
+        }
+        lv_obj_add_flag(s->ble_icon, LV_OBJ_FLAG_HIDDEN);
+    }
 
     /* No-connection label — bottom center */
     s->noconn_label = lv_label_create(s->container);
@@ -400,7 +440,7 @@ void scene_set_time_visible(scene_t *scene, bool visible)
 void scene_update_time(scene_t *scene, int hour, int minute)
 {
     if (!scene) return;
-    lv_label_set_text_fmt(scene->time_label, "%d:%02d", hour, minute);
+    lv_label_set_text_fmt(scene->time_label, "%02d:%02d", hour, minute);
 }
 
 /* ---------- BLE icon ---------- */
