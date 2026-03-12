@@ -91,24 +91,15 @@ Always returns the full current configuration:
 
 The characteristic supports BLE Long Read (Read Blob) and Long Write (Prepare Write + Execute Write) for payloads exceeding ATT_MTU.
 
-**Read (firmware side):** The read callback receives an `offset` parameter. On first call (offset=0), serialize the full config JSON into a static buffer. On subsequent calls (offset>0), return bytes starting at the offset. NimBLE issues multiple ATT Read Blob requests automatically until the client has the full value. The static buffer is safe because BLE is single-connection.
+**Read (firmware side):** NimBLE handles Long Read fragmentation internally. The access callback is called once per read — it appends the full value to `ctxt->om`, and the stack slices the response at the correct ATT offset for Read Blob requests automatically.
 
 ```c
 static int config_read_cb(uint16_t conn_handle, uint16_t attr_handle,
                            struct ble_gatt_access_ctxt *ctxt, void *arg) {
-    static char buf[512];
-    static uint16_t buf_len = 0;
-
     if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
-        uint16_t offset = ctxt->offset;  // NimBLE provides this for Long Reads
-        if (offset == 0) {
-            // Serialize fresh config on first read
-            buf_len = config_store_serialize_json(buf, sizeof(buf));
-        }
-        if (offset >= buf_len) {
-            return 0;  // No more data
-        }
-        int rc = os_mbuf_append(ctxt->om, buf + offset, buf_len - offset);
+        char buf[512];
+        uint16_t len = config_store_serialize_json(buf, sizeof(buf));
+        int rc = os_mbuf_append(ctxt->om, buf, len);
         return rc == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
     }
     // ... write handling
