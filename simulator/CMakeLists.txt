@@ -21,6 +21,8 @@ add_subdirectory(${LVGL_DIR} ${CMAKE_BINARY_DIR}/lvgl)
 # Simulator executable
 add_executable(clawd-sim
     sim_main.c
+    sim_display.c
+    sim_screenshot.c
     # Shared firmware sources (compiled unmodified)
     ${FIRMWARE_DIR}/scene.c
     ${FIRMWARE_DIR}/notification_ui.c
