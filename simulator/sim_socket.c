@@ -58,6 +58,7 @@ static volatile uint32_t s_pending_sleep_timeout_ms = 0;
 /* ---- TCP listener thread ---- */
 static int s_listen_fd = -1;
 static pthread_t s_thread;
+static bool s_thread_started = false;
 static volatile bool s_running = false;
 
 /* Handle config read/write actions on the socket thread.
@@ -65,6 +66,10 @@ static volatile bool s_running = false;
  * write_config: stores values in config_store (atomic word-sized writes)
  *   and signals main thread to call ui_manager_set_sleep_timeout(). */
 static void handle_config_action(const char *buf, uint16_t len, int client_fd) {
+    /* Note: sim_ble_parse_json() already parsed this buffer to identify it as
+     * a config action (return 2). We parse again here rather than threading
+     * the cJSON object through the shared parser interface — this is a
+     * pragmatic trade-off since the config path is cold (rare, interactive). */
     cJSON *json = cJSON_ParseWithLength(buf, len);
     if (!json) return;
 
@@ -89,8 +94,6 @@ static void handle_config_action(const char *buf, uint16_t len, int client_fd) {
         if (sleep_t && cJSON_IsNumber(sleep_t)) {
             config_store_set_sleep_timeout((uint16_t)sleep_t->valueint);
             printf("[tcp] Config: sleep_timeout=%d\n", sleep_t->valueint);
-        }
-        if (sleep_t && cJSON_IsNumber(sleep_t)) {
             s_pending_sleep_timeout_ms = (uint32_t)sleep_t->valueint * 1000;
             s_pending_config_update = true;
         }
@@ -142,6 +145,13 @@ static void handle_client(int client_fd) {
             memmove(buf, line_start, remaining);
         }
         buf_len = remaining;
+
+        /* If the buffer is full with no newline, the next recv() would be
+         * called with nbytes=0, causing a silent disconnect. Flush instead. */
+        if (buf_len == (int)(sizeof(buf) - 1)) {
+            printf("[tcp] Oversized line (>%zu bytes), discarding\n", sizeof(buf) - 1);
+            buf_len = 0;
+        }
     }
 
     printf("[tcp] Client disconnected\n");
@@ -214,6 +224,7 @@ int sim_socket_init(int port) {
         s_running = false;
         return -1;
     }
+    s_thread_started = true;
 
     return 0;
 }
@@ -240,6 +251,8 @@ void sim_socket_shutdown(void) {
         close(s_listen_fd);
         s_listen_fd = -1;
     }
-    pthread_join(s_thread, NULL);
+    if (s_thread_started) {
+        pthread_join(s_thread, NULL);
+    }
     printf("[tcp] Shut down\n");
 }

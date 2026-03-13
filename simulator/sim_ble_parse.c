@@ -2,7 +2,6 @@
 #include "sim_ble_parse.h"
 #include "cJSON.h"
 #include "config_store.h"
-#include "ui_manager.h"
 #include <stdio.h>
 #include <string.h>
 #include <sys/time.h>
