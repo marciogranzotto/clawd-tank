@@ -29,6 +29,7 @@ class SimClient:
         self._on_disconnect_cb = on_disconnect_cb
         self._on_connect_cb = on_connect_cb
         self._retry_interval = retry_interval
+        self._lock = asyncio.Lock()
 
     @property
     def is_connected(self) -> bool:
@@ -36,6 +37,8 @@ class SimClient:
 
     async def connect(self) -> None:
         """Connect to the simulator. Retries until successful."""
+        if self._writer is not None:
+            await self.disconnect()
         while True:
             try:
                 logger.info("Connecting to simulator at %s:%d...", self._host, self._port)
@@ -68,33 +71,36 @@ class SimClient:
 
     async def write_notification(self, payload: str) -> bool:
         """Send a JSON payload followed by newline. Returns True on success."""
-        if not self.is_connected:
-            logger.warning("Not connected to simulator, cannot write")
-            return False
-        try:
-            self._writer.write((payload + "\n").encode("utf-8"))
-            await self._writer.drain()
-            return True
-        except (ConnectionResetError, BrokenPipeError, OSError) as e:
-            logger.error("Simulator write failed: %s", e)
-            self._handle_disconnect()
-            return False
+        async with self._lock:
+            if not self.is_connected:
+                logger.warning("Not connected to simulator, cannot write")
+                return False
+            try:
+                self._writer.write((payload + "\n").encode("utf-8"))
+                await self._writer.drain()
+                return True
+            except (ConnectionResetError, BrokenPipeError, OSError) as e:
+                logger.error("Simulator write failed: %s", e)
+                self._handle_disconnect()
+                return False
 
     async def read_config(self) -> dict:
         """Request and read config from simulator. Returns empty dict on error."""
-        if not self.is_connected:
-            return {}
-        try:
-            self._writer.write(b'{"action":"read_config"}\n')
-            await self._writer.drain()
-            line = await asyncio.wait_for(self._reader.readline(), timeout=2.0)
-            if not line:
+        async with self._lock:
+            if not self.is_connected:
+                return {}
+            try:
+                self._writer.write(b'{"action":"read_config"}\n')
+                await self._writer.drain()
+                line = await asyncio.wait_for(self._reader.readline(), timeout=2.0)
+                if not line:
+                    self._handle_disconnect()
+                    return {}
+                return json.loads(line.decode("utf-8").strip())
+            except (asyncio.TimeoutError, json.JSONDecodeError, OSError) as e:
+                logger.error("Config read failed: %s", e)
                 self._handle_disconnect()
                 return {}
-            return json.loads(line.decode("utf-8").strip())
-        except (asyncio.TimeoutError, json.JSONDecodeError, OSError) as e:
-            logger.error("Config read failed: %s", e)
-            return {}
 
     async def write_config(self, payload: str) -> bool:
         """Send a config write payload. Returns True on success."""

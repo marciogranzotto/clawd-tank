@@ -146,3 +146,42 @@ async def test_write_when_disconnected_returns_false():
     client = SimClient(port=1)  # Port doesn't matter, never connects
     result = await client.write_notification('{"action":"clear"}')
     assert result is False
+
+
+@pytest.mark.asyncio
+async def test_on_connect_cb_called():
+    connected = []
+
+    async def handler(reader, writer):
+        await reader.read(1)  # wait for client to close
+        writer.close()
+
+    server, port = await start_mock_server(handler)
+    async with server:
+        client = SimClient(port=port, on_connect_cb=lambda: connected.append(True))
+        await client.connect()
+        assert len(connected) == 1
+        await client.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_on_disconnect_cb_called():
+    disconnected = []
+
+    async def handler(reader, writer):
+        writer.close()
+        await writer.wait_closed()
+
+    server, port = await start_mock_server(handler)
+    async with server:
+        client = SimClient(
+            port=port,
+            on_disconnect_cb=lambda: disconnected.append(True),
+        )
+        await client.connect()
+        await asyncio.sleep(0.1)  # Let server close propagate
+        result = await client.write_notification('{"action":"clear"}')
+        if result:
+            await asyncio.sleep(0.05)
+            await client.write_notification('{"action":"clear"}')
+        assert len(disconnected) >= 1
