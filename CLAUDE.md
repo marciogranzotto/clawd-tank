@@ -91,7 +91,8 @@ python tools/ble_interactive.py
 ### Data Flow
 
 ```
-Claude Code hooks → clawd-tank-notify → Unix socket → clawd_tank_daemon → BLE → ESP32-C6 firmware
+Claude Code hooks (Stop/Notification/UserPromptSubmit/SessionEnd)
+    → ~/.clawd-tank/clawd-tank-notify → Unix socket → clawd_tank_daemon → BLE → ESP32-C6 firmware
                                                                         ↘ TCP → Simulator (SDL2)
                                                                           ↓
                                                               ble_service → event queue → ui_manager
@@ -121,9 +122,9 @@ Key simulator-specific files:
 
 ### Host (`host/`)
 
-- **clawd-tank-notify** — Executable hook entry point. Reads Claude Code hook stdin, forwards to daemon via Unix socket.
+- **clawd-tank-notify** — Standalone hook handler (installed to `~/.clawd-tank/clawd-tank-notify` by the menu bar app). Reads Claude Code hook stdin, converts to daemon message, forwards via Unix socket. Uses only stdlib — no external imports.
 - **clawd_tank_daemon/** — Async Python daemon (asyncio). Multi-transport architecture with `TransportClient` Protocol. Supports BLE (`ClawdBleClient`) and TCP simulator (`SimClient`) transports with independent per-transport queues and sender tasks. Dynamic transport add/remove at runtime.
-- **clawd_tank_menubar/** — macOS status bar app (rumps). Per-transport status display, simulator toggle with preference persistence (`~/.clawd-tank/preferences.json`), brightness/sleep config.
+- **clawd_tank_menubar/** — macOS status bar app (rumps). Per-transport status display, simulator toggle with preference persistence (`~/.clawd-tank/preferences.json`), brightness/sleep config, Claude Code hook installer (`hooks.py`), log file output (`~/Library/Logs/ClawdTank/clawd-tank.log`).
 
 ## Key Constraints
 

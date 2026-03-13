@@ -15,8 +15,8 @@ Claude Code hooks --> clawd-tank-notify --> daemon --> BLE --> ESP32-C6 display
                                                   \-> TCP --> Simulator (SDL2)
 ```
 
-1. **Claude Code hooks** fire on notifications (task complete, idle prompt, stop, etc.)
-2. **clawd-tank-notify** forwards the event to a background Python daemon via Unix socket
+1. **Claude Code hooks** (`Stop`, `Notification`, `UserPromptSubmit`, `SessionEnd`) fire on session events
+2. **clawd-tank-notify** (`~/.clawd-tank/clawd-tank-notify`) forwards the event to the daemon via Unix socket
 3. The **daemon** maintains connections to one or more transports (BLE hardware, TCP simulator) and sends JSON payloads
 4. The **firmware** (or simulator) renders Clawd + notification cards on the LCD via LVGL
 
@@ -75,22 +75,6 @@ idf.py build
 idf.py -p /dev/ttyACM0 flash monitor
 ```
 
-### Host Daemon
-
-```bash
-cd host
-pip install -r requirements.txt
-./install-hooks.sh  # prints hook config for ~/.claude/settings.json
-
-# Run daemon with simulator transport
-python -m clawd_tank_daemon --sim
-
-# Run daemon with simulator only (no BLE)
-python -m clawd_tank_daemon --sim-only
-```
-
-The daemon auto-starts on the first hook event. Logs at `~/.clawd-tank/daemon.log`.
-
 ### macOS Menu Bar App
 
 The menu bar app bundles the daemon with a status bar UI for controlling brightness, sleep timeout, connection, and an optional simulator transport toggle.
@@ -104,7 +88,28 @@ cd host && pip install py2app && python setup.py py2app
 open "dist/Clawd Tank.app"
 ```
 
+On launch, the app automatically installs a hook handler script to `~/.clawd-tank/clawd-tank-notify`. To connect it to Claude Code, click **"Install Claude Code Hooks"** in the menu bar dropdown — this adds the required hooks to `~/.claude/settings.json`. Restart any running Claude Code sessions for hooks to take effect.
+
+Logs are written to `~/Library/Logs/ClawdTank/clawd-tank.log`.
+
 Pre-built DMGs are available on the [Releases](https://github.com/marciogranzotto/clawd-tank/releases) page.
+
+### Host Daemon (standalone)
+
+The daemon can also run standalone without the menu bar app:
+
+```bash
+cd host
+pip install -r requirements.txt
+
+# Run daemon with simulator transport
+python -m clawd_tank_daemon --sim
+
+# Run daemon with simulator only (no BLE)
+python -m clawd_tank_daemon --sim-only
+```
+
+The daemon auto-starts on the first hook event. Logs at `~/.clawd-tank/daemon.log`.
 
 ## Features
 
@@ -115,7 +120,7 @@ Pre-built DMGs are available on the [Releases](https://github.com/marciogranzott
 - **Simulator bridge** — full pipeline works without hardware via `--listen` flag and TCP
 - **Auto-reconnect** — daemon replays active notifications after reconnect on any transport
 - **Config over BLE/TCP** — brightness and sleep timeout adjustable via config characteristic or TCP
-- **macOS menu bar app** — per-transport status, brightness slider, sleep timeout, simulator toggle, launch-at-login
+- **macOS menu bar app** — per-transport status, brightness slider, sleep timeout, simulator toggle, hook installer, launch-at-login
 
 ## Clawd's Moods
 
