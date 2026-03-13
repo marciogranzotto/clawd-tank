@@ -1,4 +1,5 @@
 import asyncio
+import json
 import pytest
 from unittest.mock import AsyncMock, patch
 from clawd_tank_daemon.daemon import ClawdDaemon
@@ -272,9 +273,9 @@ async def test_ble_write_failure_replays_multiple_active():
     async def mock_write(payload):
         call_count[0] += 1
         write_calls.append(payload)
-        # Fail on the second write (the queued dismiss).
-        # First write is the initial sync_time from _transport_sender.
-        if call_count[0] == 2:
+        # Fail on the 4th write (the queued dismiss).
+        # Writes 1-3 are: initial sync_time, initial replay s1, initial replay s2.
+        if call_count[0] == 4:
             return False
         return True
 
@@ -299,9 +300,9 @@ async def test_ble_write_failure_replays_multiple_active():
     except asyncio.CancelledError:
         pass
 
-    import json
-    # write_calls: [0]=sync_time, [1]=failing dismiss, [2+]=replay writes
-    replayed_ids = {json.loads(p).get("id") for p in write_calls[2:] if json.loads(p).get("id")}
+    # write_calls: [0]=sync_time, [1]=replay s1, [2]=replay s2,
+    #              [3]=failing dismiss, [4+]=replay writes after failure
+    replayed_ids = {json.loads(p).get("id") for p in write_calls[4:] if json.loads(p).get("id")}
     assert "s1" in replayed_ids
     assert "s2" in replayed_ids
 
@@ -324,3 +325,35 @@ async def test_sim_only_mode_has_no_ble_transport():
     daemon = ClawdDaemon(sim_port=19872, sim_only=True)
     assert "ble" not in daemon._transports
     assert "sim" in daemon._transports
+
+
+@pytest.mark.asyncio
+async def test_transport_sender_replays_active_on_initial_connect():
+    """Sender replays active notifications after initial connect + sync_time."""
+    daemon = ClawdDaemon()
+    daemon._active_notifications = {
+        "s1": {"event": "add", "session_id": "s1", "project": "p", "message": "m1"},
+    }
+
+    mock_transport = AsyncMock()
+    mock_transport.is_connected = True
+    mock_transport.ensure_connected = AsyncMock()
+    mock_transport.write_notification = AsyncMock(return_value=True)
+    daemon._transports["ble"] = mock_transport
+
+    sender = asyncio.create_task(daemon._transport_sender("ble"))
+    await asyncio.sleep(0.3)
+    daemon._running = False
+    sender.cancel()
+    try:
+        await sender
+    except asyncio.CancelledError:
+        pass
+
+    # Calls: sync_time, then replay (1 notification)
+    write_calls = mock_transport.write_notification.call_args_list
+    assert len(write_calls) >= 2
+    # Second call should be the replayed notification
+    replayed = json.loads(write_calls[1][0][0])
+    assert replayed["action"] == "add"
+    assert replayed["id"]  # has an id field

@@ -111,6 +111,7 @@ class ClawdDaemon:
             self._transports["sim"] = sim
             self._transport_queues["sim"] = asyncio.Queue()
 
+        self._sender_tasks: dict[str, asyncio.Task] = {}
         self._socket = SocketServer(on_message=self._handle_message)
         self._active_notifications: dict[str, dict] = {}
         self._running = True
@@ -123,6 +124,8 @@ class ClawdDaemon:
         """Handle a message from clawd-tank-notify via the socket."""
         event = msg.get("event")
         session_id = msg.get("session_id", "")
+        logger.info("Socket msg: event=%s session=%s project=%s",
+                     event, session_id[:12], msg.get("project", "?"))
 
         if event == "add":
             self._active_notifications[session_id] = msg
@@ -182,6 +185,7 @@ class ClawdDaemon:
         await transport.ensure_connected()
         if transport.is_connected:
             await self._sync_time_for(transport)
+            await self._replay_active_for(transport)
         while self._running:
             try:
                 msg = await asyncio.wait_for(queue.get(), timeout=1.0)
@@ -219,6 +223,15 @@ class ClawdDaemon:
         logger.info("Shutting down...")
         self._running = False
         self._shutdown_event.set()
+
+        for task in self._sender_tasks.values():
+            task.cancel()
+        for task in self._sender_tasks.values():
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        self._sender_tasks.clear()
 
         clear_payload = daemon_message_to_ble_payload({"event": "clear"})
         for transport in self._transports.values():
@@ -269,19 +282,11 @@ class ClawdDaemon:
 
         await self._socket.start()
 
-        tasks = []
         for name in self._transports:
             # Each sender handles its own connect via ensure_connected()
-            tasks.append(asyncio.create_task(self._transport_sender(name)))
+            self._sender_tasks[name] = asyncio.create_task(self._transport_sender(name))
 
         await self._shutdown_event.wait()
-
-        for task in tasks:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
 
 
 def main():
