@@ -4,6 +4,7 @@
 import asyncio
 import json
 import logging
+import os
 import threading
 from typing import Optional
 
@@ -225,12 +226,16 @@ class ClawdTankApp(rumps.App, DaemonObserver):
             )
 
     def _on_quit(self, _):
-        if self._loop and self._daemon:
-            future = asyncio.run_coroutine_threadsafe(
-                self._daemon._shutdown(), self._loop
-            )
-            future.result(timeout=5)
-        rumps.quit_application()
+        try:
+            if self._loop and self._daemon:
+                future = asyncio.run_coroutine_threadsafe(
+                    self._daemon._shutdown(), self._loop
+                )
+                future.result(timeout=5)
+            rumps.quit_application()
+        except Exception:
+            logger.exception("Error during quit, force-killing")
+            os._exit(1)
 
 
 def main():
