@@ -53,7 +53,6 @@ static bool queue_pop(ble_evt_t *out) {
 
 /* ---- Pending config update (socket thread -> main thread) ---- */
 static volatile bool s_pending_config_update = false;
-static volatile uint32_t s_pending_sleep_timeout_ms = 0;
 
 /* ---- TCP listener thread ---- */
 static int s_listen_fd = -1;
@@ -63,8 +62,7 @@ static volatile bool s_running = false;
 
 /* Handle config read/write actions on the socket thread.
  * read_config: atomic read of config_store state (no LVGL interaction).
- * write_config: stores values in config_store (atomic word-sized writes)
- *   and signals main thread to call ui_manager_set_sleep_timeout(). */
+ * write_config: stores values in config_store (atomic word-sized writes). */
 static void handle_config_action(const char *buf, uint16_t len, int client_fd) {
     /* Note: sim_ble_parse_json() already parsed this buffer to identify it as
      * a config action (return 2). We parse again here rather than threading
@@ -93,9 +91,7 @@ static void handle_config_action(const char *buf, uint16_t len, int client_fd) {
         cJSON *sleep_t = cJSON_GetObjectItem(json, "sleep_timeout");
         if (sleep_t && cJSON_IsNumber(sleep_t)) {
             config_store_set_sleep_timeout((uint16_t)sleep_t->valueint);
-            printf("[tcp] Config: sleep_timeout=%d\n", sleep_t->valueint);
-            s_pending_sleep_timeout_ms = (uint32_t)sleep_t->valueint * 1000;
-            s_pending_config_update = true;
+            printf("[tcp] Config: sleep_timeout=%d (daemon-driven, stored only)\n", sleep_t->valueint);
         }
     }
 
@@ -235,11 +231,6 @@ bool sim_socket_process(void) {
     while (queue_pop(&evt)) {
         ui_manager_handle_event(&evt);
         any = true;
-    }
-    /* Apply pending config updates from socket thread */
-    if (s_pending_config_update) {
-        s_pending_config_update = false;
-        ui_manager_set_sleep_timeout(s_pending_sleep_timeout_ms);
     }
     return any;
 }

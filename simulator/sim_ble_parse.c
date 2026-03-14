@@ -7,6 +7,18 @@
 #include <sys/time.h>
 #include <stdlib.h>
 
+static int parse_display_status(const char *str) {
+    if (strcmp(str, "sleeping") == 0) return DISPLAY_STATUS_SLEEPING;
+    if (strcmp(str, "idle") == 0) return DISPLAY_STATUS_IDLE;
+    if (strcmp(str, "thinking") == 0) return DISPLAY_STATUS_THINKING;
+    if (strcmp(str, "working_1") == 0) return DISPLAY_STATUS_WORKING_1;
+    if (strcmp(str, "working_2") == 0) return DISPLAY_STATUS_WORKING_2;
+    if (strcmp(str, "working_3") == 0) return DISPLAY_STATUS_WORKING_3;
+    if (strcmp(str, "confused") == 0) return DISPLAY_STATUS_CONFUSED;
+    if (strcmp(str, "sweeping") == 0) return DISPLAY_STATUS_SWEEPING;
+    return -1;
+}
+
 static void safe_strncpy(char *dst, const char *src, size_t n) {
     if (!src) { dst[0] = '\0'; return; }
     strncpy(dst, src, n - 1);
@@ -60,6 +72,19 @@ int sim_ble_parse_json(const char *buf, uint16_t len, ble_evt_t *out) {
         }
         cJSON_Delete(json);
         return 1;
+    } else if (strcmp(action->valuestring, "set_status") == 0) {
+        cJSON *status = cJSON_GetObjectItem(json, "status");
+        if (!status || !cJSON_IsString(status)) {
+            cJSON_Delete(json);
+            return -1;
+        }
+        int s = parse_display_status(status->valuestring);
+        if (s < 0) {
+            cJSON_Delete(json);
+            return -1;
+        }
+        out->type = BLE_EVT_SET_STATUS;
+        out->status = (uint8_t)s;
     } else if (strcmp(action->valuestring, "write_config") == 0 ||
                strcmp(action->valuestring, "read_config") == 0) {
         cJSON_Delete(json);

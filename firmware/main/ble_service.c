@@ -47,6 +47,18 @@ static void safe_strncpy(char *dst, const char *src, size_t n) {
     dst[n - 1] = '\0';
 }
 
+static int parse_display_status(const char *str) {
+    if (strcmp(str, "sleeping") == 0) return DISPLAY_STATUS_SLEEPING;
+    if (strcmp(str, "idle") == 0) return DISPLAY_STATUS_IDLE;
+    if (strcmp(str, "thinking") == 0) return DISPLAY_STATUS_THINKING;
+    if (strcmp(str, "working_1") == 0) return DISPLAY_STATUS_WORKING_1;
+    if (strcmp(str, "working_2") == 0) return DISPLAY_STATUS_WORKING_2;
+    if (strcmp(str, "working_3") == 0) return DISPLAY_STATUS_WORKING_3;
+    if (strcmp(str, "confused") == 0) return DISPLAY_STATUS_CONFUSED;
+    if (strcmp(str, "sweeping") == 0) return DISPLAY_STATUS_SWEEPING;
+    return -1;
+}
+
 static void parse_notification_json(const char *buf, uint16_t len) {
     cJSON *json = cJSON_ParseWithLength(buf, len);
     if (!json) {
@@ -104,6 +116,21 @@ static void parse_notification_json(const char *buf, uint16_t len) {
         }
         cJSON_Delete(json);
         return;
+    } else if (strcmp(action->valuestring, "set_status") == 0) {
+        cJSON *status = cJSON_GetObjectItem(json, "status");
+        if (!status || !cJSON_IsString(status)) {
+            ESP_LOGW(TAG, "set_status: missing 'status' field");
+            cJSON_Delete(json);
+            return;
+        }
+        int s = parse_display_status(status->valuestring);
+        if (s < 0) {
+            ESP_LOGW(TAG, "set_status: unknown status '%s'", status->valuestring);
+            cJSON_Delete(json);
+            return;
+        }
+        evt.type = BLE_EVT_SET_STATUS;
+        evt.status = (uint8_t)s;
     } else {
         ESP_LOGW(TAG, "Unknown action '%s', ignoring", action->valuestring);
         cJSON_Delete(json);
@@ -184,8 +211,7 @@ static int config_access_cb(uint16_t conn_handle, uint16_t attr_handle,
             int val = sleep_timeout->valueint;
             if (val >= 0 && val <= 3600) {
                 config_store_set_sleep_timeout((uint16_t)val);
-                ui_manager_set_sleep_timeout((uint32_t)val * 1000);
-                ESP_LOGI(TAG, "Config: sleep_timeout=%d", val);
+                ESP_LOGI(TAG, "Config: sleep_timeout=%d (daemon-driven, stored only)", val);
             }
         }
 

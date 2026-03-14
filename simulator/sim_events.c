@@ -116,8 +116,7 @@ void sim_events_init_inline(const char *events_str)
                 cJSON *sleep_t = cJSON_GetObjectItem(json, "sleep_timeout");
                 if (sleep_t && cJSON_IsNumber(sleep_t)) {
                     config_store_set_sleep_timeout((uint16_t)sleep_t->valueint);
-                    ui_manager_set_sleep_timeout((uint32_t)sleep_t->valueint * 1000);
-                    printf("[sim] Config: sleep_timeout=%d\n", sleep_t->valueint);
+                    printf("[sim] Config: sleep_timeout=%d (daemon-driven, stored only)\n", sleep_t->valueint);
                 }
                 cJSON_Delete(json);
             }

@@ -4,6 +4,7 @@
 #include "notification_ui.h"
 #include "notification.h"
 #include "config_store.h"
+#include "display.h"
 #include "rgb_led.h"
 #include "esp_log.h"
 #include <stdio.h>
@@ -24,8 +25,6 @@ typedef enum {
 #define SCENE_NOTIF_WIDTH  107
 #define SCENE_ANIM_MS      400
 
-static uint32_t s_sleep_timeout_ms = 5 * 60 * 1000;  /* updated by config store */
-
 /* ---------- Module state ---------- */
 
 static ui_state_t s_state = UI_STATE_DISCONNECTED;
@@ -33,7 +32,6 @@ static notification_store_t s_store;
 
 /* Protects all LVGL calls and store mutations that happen from two contexts:
  *   - ui_task (via ui_manager_handle_event + ui_manager_tick → lv_timer_handler)
- *   - any future caller of ui_manager_set_sleep_timeout from another task
  * The lock must be held whenever calling rebuild_ui() or lv_timer_handler()
  * because LVGL is not thread-safe and both paths touch the same widget tree.
  *
@@ -51,7 +49,7 @@ static notification_ui_t *s_notif_ui = NULL;
 
 static bool s_connected = false;
 static uint32_t s_last_activity_tick = 0;
-static bool s_sleeping = false;
+static display_status_t s_display_status = DISPLAY_STATUS_IDLE;
 static int s_last_minute = -1;
 
 static void scene_animate_width(int target_px, int anim_ms)
@@ -77,6 +75,20 @@ static void scene_animate_width(int target_px, int anim_ms)
     }
 }
 
+static clawd_anim_id_t status_to_anim(display_status_t status) {
+    switch (status) {
+    case DISPLAY_STATUS_SLEEPING:  return CLAWD_ANIM_SLEEPING;
+    case DISPLAY_STATUS_IDLE:      return CLAWD_ANIM_IDLE;
+    case DISPLAY_STATUS_THINKING:  return CLAWD_ANIM_IDLE;  /* placeholder until sprite exists */
+    case DISPLAY_STATUS_WORKING_1: return CLAWD_ANIM_IDLE;  /* placeholder */
+    case DISPLAY_STATUS_WORKING_2: return CLAWD_ANIM_IDLE;  /* placeholder */
+    case DISPLAY_STATUS_WORKING_3: return CLAWD_ANIM_IDLE;  /* placeholder */
+    case DISPLAY_STATUS_CONFUSED:  return CLAWD_ANIM_IDLE;  /* placeholder */
+    case DISPLAY_STATUS_SWEEPING:  return CLAWD_ANIM_IDLE;  /* placeholder */
+    default:                       return CLAWD_ANIM_IDLE;
+    }
+}
+
 /* ---------- Transition ---------- */
 
 static void transition_to(ui_state_t new_state)
@@ -95,10 +107,10 @@ static void transition_to(ui_state_t new_state)
 
         /* Don't overwrite a oneshot animation (happy/alert) */
         if (!scene_is_playing_oneshot(s_scene)) {
-            scene_set_clawd_anim(s_scene, CLAWD_ANIM_IDLE);
+            scene_set_clawd_anim(s_scene, status_to_anim(s_display_status));
         }
+        scene_set_fallback_anim(s_scene, status_to_anim(s_display_status));
 
-        s_sleeping = false;
         s_last_activity_tick = lv_tick_get();
         break;
 
@@ -110,7 +122,6 @@ static void transition_to(ui_state_t new_state)
         scene_set_time_visible(s_scene, false);
         scene_set_clawd_anim(s_scene, CLAWD_ANIM_ALERT);
 
-        s_sleeping = false;
         s_last_activity_tick = lv_tick_get();
         break;
 
@@ -120,8 +131,6 @@ static void transition_to(ui_state_t new_state)
 
         scene_set_time_visible(s_scene, false);
         scene_set_clawd_anim(s_scene, CLAWD_ANIM_DISCONNECTED);
-
-        s_sleeping = false;
         break;
     }
 }
@@ -131,7 +140,6 @@ static void transition_to(ui_state_t new_state)
 void ui_manager_init(void)
 {
     _lock_init(&s_lock);
-    s_sleep_timeout_ms = config_store_get_sleep_timeout_ms();
     notif_store_init(&s_store);
 
     lv_obj_t *screen = lv_screen_active();
@@ -222,6 +230,31 @@ void ui_manager_handle_event(const ble_evt_t *evt)
         transition_to(UI_STATE_FULL_IDLE);
         s_last_activity_tick = lv_tick_get();
         break;
+
+    case BLE_EVT_SET_STATUS: {
+        display_status_t new_status = (display_status_t)evt->status;
+        ESP_LOGI(TAG, "Set status: %d", new_status);
+        display_status_t old_status = s_display_status;
+        s_display_status = new_status;
+
+        clawd_anim_id_t anim = status_to_anim(new_status);
+        scene_set_fallback_anim(s_scene, anim);
+
+        /* Handle backlight for sleep/wake */
+        if (new_status == DISPLAY_STATUS_SLEEPING && old_status != DISPLAY_STATUS_SLEEPING) {
+            display_set_brightness(0);
+        } else if (new_status != DISPLAY_STATUS_SLEEPING && old_status == DISPLAY_STATUS_SLEEPING) {
+            display_set_brightness(config_store_get_brightness());
+        }
+
+        /* Don't interrupt a playing oneshot — the fallback will take effect when it finishes */
+        if (!scene_is_playing_oneshot(s_scene)) {
+            scene_set_clawd_anim(s_scene, anim);
+        }
+
+        s_last_activity_tick = lv_tick_get();
+        break;
+    }
     }
 
     _lock_release(&s_lock);
@@ -236,18 +269,8 @@ void ui_manager_tick(void)
     /* Scene animation tick (sprite frame advance, star twinkle) */
     scene_tick(s_scene);
 
-    /* Sleep timeout: 5 minutes of idle while connected */
-    if (s_state == UI_STATE_FULL_IDLE && s_connected && !s_sleeping) {
-        uint32_t elapsed = lv_tick_get() - s_last_activity_tick;
-        if (s_sleep_timeout_ms > 0 && elapsed >= s_sleep_timeout_ms) {
-            scene_set_clawd_anim(s_scene, CLAWD_ANIM_SLEEPING);
-            s_sleeping = true;
-            ESP_LOGI(TAG, "Clawd falling asleep (5m idle)");
-        }
-    }
-
     /* Time update: check once per tick, update when minute changes */
-    if (s_state == UI_STATE_FULL_IDLE) {
+    if (s_state != UI_STATE_NOTIFICATION && s_state != UI_STATE_DISCONNECTED) {
         struct timeval tv;
         gettimeofday(&tv, NULL);
         struct tm tm;
@@ -265,17 +288,3 @@ void ui_manager_tick(void)
     _lock_release(&s_lock);
 }
 
-void ui_manager_set_sleep_timeout(uint32_t ms)
-{
-    _lock_acquire(&s_lock);
-    s_sleep_timeout_ms = ms;
-    s_last_activity_tick = lv_tick_get();  /* reset idle timer */
-    if (s_sleeping) {
-        s_sleeping = false;
-        if (s_state == UI_STATE_FULL_IDLE) {
-            scene_set_clawd_anim(s_scene, CLAWD_ANIM_IDLE);
-        }
-    }
-    _lock_release(&s_lock);
-    ESP_LOGI(TAG, "Sleep timeout set to %lu ms", (unsigned long)ms);
-}

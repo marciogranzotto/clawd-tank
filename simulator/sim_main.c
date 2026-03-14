@@ -256,8 +256,9 @@ static void handle_sdl_events(void)
                 break;
             }
             case SDLK_z: {
-                /* Force sleeping state by setting timeout to 1ms */
-                ui_manager_set_sleep_timeout(1);
+                /* Force sleeping state via set_status event */
+                ble_evt_t sleep_evt = { .type = BLE_EVT_SET_STATUS, .status = DISPLAY_STATUS_SLEEPING };
+                ui_manager_handle_event(&sleep_evt);
                 printf("[key] sleep\n");
                 break;
             }

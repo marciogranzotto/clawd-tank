@@ -139,6 +139,7 @@ struct scene_t {
     clawd_anim_id_t cur_anim;
     int frame_idx;
     uint32_t last_frame_tick;
+    clawd_anim_id_t fallback_anim;  /* animation to return to after oneshot */
 
     /* Time label */
     lv_obj_t *time_label;
@@ -262,6 +263,7 @@ scene_t *scene_create(lv_obj_t *parent)
 
     /* Set up idle animation as default */
     s->cur_anim = CLAWD_ANIM_IDLE;
+    s->fallback_anim = CLAWD_ANIM_IDLE;
     s->frame_idx = 0;
     s->last_frame_tick = lv_tick_get();
     decode_and_apply_frame(s);
@@ -334,6 +336,12 @@ void scene_set_clawd_anim(scene_t *scene, clawd_anim_id_t anim)
     }
 }
 
+void scene_set_fallback_anim(scene_t *scene, clawd_anim_id_t anim)
+{
+    if (!scene) return;
+    scene->fallback_anim = anim;
+}
+
 /* ---------- Time ---------- */
 
 void scene_set_time_visible(scene_t *scene, bool visible)
@@ -371,8 +379,8 @@ void scene_tick(scene_t *scene)
             if (scene->frame_idx < def->frame_count - 1) {
                 scene->frame_idx++;
             } else {
-                /* Oneshot finished — auto-return to idle */
-                scene_set_clawd_anim(scene, CLAWD_ANIM_IDLE);
+                /* Oneshot finished — auto-return to fallback */
+                scene_set_clawd_anim(scene, scene->fallback_anim);
                 return;
             }
         }

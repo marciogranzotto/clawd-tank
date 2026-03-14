@@ -22,6 +22,7 @@ add_subdirectory(${LVGL_DIR} ${CMAKE_BINARY_DIR}/lvgl)
 add_executable(clawd-tank-sim
     sim_main.c
     sim_display.c
+    sim_display_shim.c
     sim_screenshot.c
     sim_events.c
     sim_ble_parse.c
