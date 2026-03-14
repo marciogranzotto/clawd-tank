@@ -6,25 +6,31 @@ from setuptools import setup
 
 def _bake_version():
     """Generate _version_info.py with the current git version."""
+    def _run(args):
+        return subprocess.run(args, capture_output=True, text=True, timeout=5)
+
+    def _is_dirty():
+        r = _run(["git", "status", "--porcelain"])
+        return bool(r.stdout.strip())
+
     try:
-        tag = subprocess.run(
-            ["git", "describe", "--tags", "--exact-match", "HEAD"],
-            capture_output=True, text=True, timeout=5,
-        )
+        tag = _run(["git", "describe", "--tags", "--exact-match", "HEAD"])
         if tag.returncode == 0 and tag.stdout.strip():
             version = tag.stdout.strip()
+            if _is_dirty():
+                version += "-dirty"
         else:
-            branch = subprocess.run(
-                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                capture_output=True, text=True, timeout=5,
-            )
-            sha = subprocess.run(
-                ["git", "rev-parse", "--short", "HEAD"],
-                capture_output=True, text=True, timeout=5,
-            )
+            branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+            sha = _run(["git", "rev-parse", "--short", "HEAD"])
+            count = _run(["git", "rev-list", "--count", "HEAD", "^master"])
+            if count.returncode != 0:
+                count = _run(["git", "rev-list", "--count", "HEAD", "^main"])
+
             b = branch.stdout.strip() if branch.returncode == 0 else "unknown"
             s = sha.stdout.strip() if sha.returncode == 0 else "??????"
-            version = f"{b}@{s}"
+            n = count.stdout.strip() if count.returncode == 0 else "?"
+            dirty = "-dirty" if _is_dirty() else ""
+            version = f"{b}+{n}@{s}{dirty}"
     except (FileNotFoundError, subprocess.TimeoutExpired):
         version = "unknown"
 

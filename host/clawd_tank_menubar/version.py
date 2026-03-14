@@ -33,7 +33,7 @@ def get_version() -> str:
 
 
 def _version_from_git() -> str:
-    """Derive version from git: tag if on one, else branch+sha."""
+    """Derive version from git: tag if on one, else branch+commits@sha[-dirty]."""
     try:
         # Check if HEAD is tagged
         tag = subprocess.run(
@@ -41,9 +41,12 @@ def _version_from_git() -> str:
             capture_output=True, text=True, timeout=5,
         )
         if tag.returncode == 0 and tag.stdout.strip():
-            return tag.stdout.strip()
+            version = tag.stdout.strip()
+            if _is_dirty():
+                version += "-dirty"
+            return version
 
-        # Not on a tag — use branch + short sha
+        # Not on a tag — use branch+N@sha[-dirty]
         branch = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True, text=True, timeout=5,
@@ -52,8 +55,34 @@ def _version_from_git() -> str:
             ["git", "rev-parse", "--short", "HEAD"],
             capture_output=True, text=True, timeout=5,
         )
+        count = subprocess.run(
+            ["git", "rev-list", "--count", "HEAD", "--not", "--remotes=origin/master",
+             "--remotes=origin/main"],
+            capture_output=True, text=True, timeout=5,
+        )
+        # Fallback: count all commits on the branch since it diverged from master/main
+        if count.returncode != 0:
+            count = subprocess.run(
+                ["git", "rev-list", "--count", "HEAD", "^master"],
+                capture_output=True, text=True, timeout=5,
+            )
+
         branch_name = branch.stdout.strip() if branch.returncode == 0 else "unknown"
         short_sha = sha.stdout.strip() if sha.returncode == 0 else "??????"
-        return f"{branch_name}@{short_sha}"
+        n = count.stdout.strip() if count.returncode == 0 else "?"
+        dirty = "-dirty" if _is_dirty() else ""
+        return f"{branch_name}+{n}@{short_sha}{dirty}"
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return "unknown"
+
+
+def _is_dirty() -> bool:
+    """Check if there are uncommitted changes."""
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return bool(result.stdout.strip())
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
