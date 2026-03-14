@@ -244,3 +244,60 @@ async def test_multiple_subagents_tracked():
     assert d._session_states["s1"]["subagents"] == {"a1", "a2"}
     await d._handle_message({"event": "subagent_stop", "session_id": "s1", "agent_id": "a1"})
     assert d._session_states["s1"]["subagents"] == {"a2"}
+
+
+# --- Task 4 / Task 5: eviction suppression and subagent display state ---
+
+def test_staleness_skips_sessions_with_active_subagents():
+    d = make_daemon()
+    d._session_staleness_timeout = 1
+    d._session_states["s1"] = {
+        "state": "idle",
+        "last_event": time.time() - 9999,
+        "subagents": {"a1"},
+    }
+    d._evict_stale_sessions()
+    assert "s1" in d._session_states  # NOT evicted
+
+
+def test_staleness_evicts_after_all_subagents_stop():
+    d = make_daemon()
+    d._session_staleness_timeout = 1
+    d._session_states["s1"] = {
+        "state": "idle",
+        "last_event": time.time() - 9999,
+        "subagents": set(),  # empty — all subagents stopped
+    }
+    d._evict_stale_sessions()
+    assert "s1" not in d._session_states  # evicted
+
+
+def test_idle_session_with_subagents_counts_as_working():
+    d = make_daemon()
+    d._session_states["s1"] = {
+        "state": "idle",
+        "last_event": time.time(),
+        "subagents": {"a1"},
+    }
+    assert d._compute_display_state() == "working_1"
+
+
+def test_multiple_sessions_with_subagents_count_working():
+    d = make_daemon()
+    d._session_states["s1"] = {
+        "state": "idle", "last_event": time.time(), "subagents": {"a1"},
+    }
+    d._session_states["s2"] = {
+        "state": "working", "last_event": time.time(),
+    }
+    assert d._compute_display_state() == "working_2"
+
+
+def test_session_with_empty_subagents_not_counted_as_working():
+    d = make_daemon()
+    d._session_states["s1"] = {
+        "state": "idle",
+        "last_event": time.time(),
+        "subagents": set(),
+    }
+    assert d._compute_display_state() == "idle"

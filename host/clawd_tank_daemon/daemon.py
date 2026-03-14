@@ -222,6 +222,7 @@ class ClawdDaemon:
         stale = [
             sid for sid, s in self._session_states.items()
             if now - s["last_event"] > self._session_staleness_timeout
+            and not s.get("subagents")
         ]
         for sid in stale:
             logger.info("Evicting stale session: %s", sid[:12])
