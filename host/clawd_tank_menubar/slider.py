@@ -52,14 +52,14 @@ def create_slider_menu_item(label: str, min_val: int = 0, max_val: int = 255,
 
     # Create container view
     width = 250
-    height = 48
+    height = 56
     view = AppKit.NSView.alloc().initWithFrame_(
         AppKit.NSMakeRect(0, 0, width, height)
     )
 
     # Label
     label_field = AppKit.NSTextField.labelWithString_(label)
-    label_field.setFrame_(AppKit.NSMakeRect(16, 26, 120, 16))
+    label_field.setFrame_(AppKit.NSMakeRect(16, 34, 120, 16))
     label_field.setFont_(AppKit.NSFont.systemFontOfSize_(13))
     view.addSubview_(label_field)
 
@@ -67,14 +67,14 @@ def create_slider_menu_item(label: str, min_val: int = 0, max_val: int = 255,
     instance._value_label = AppKit.NSTextField.labelWithString_(
         f"{int(initial / 255 * 100)}%"
     )
-    instance._value_label.setFrame_(AppKit.NSMakeRect(width - 50, 26, 34, 16))
+    instance._value_label.setFrame_(AppKit.NSMakeRect(width - 50, 34, 34, 16))
     instance._value_label.setFont_(AppKit.NSFont.systemFontOfSize_(11))
     instance._value_label.setAlignment_(AppKit.NSTextAlignmentRight)
     view.addSubview_(instance._value_label)
 
     # Slider
     instance._slider = AppKit.NSSlider.alloc().initWithFrame_(
-        AppKit.NSMakeRect(16, 4, width - 32, 20)
+        AppKit.NSMakeRect(16, 6, width - 32, 20)
     )
     instance._slider.setMinValue_(min_val)
     instance._slider.setMaxValue_(max_val)

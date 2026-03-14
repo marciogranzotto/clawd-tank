@@ -420,9 +420,13 @@ class ClawdTankApp(rumps.App, DaemonObserver):
             client = await self._sim_process.start()
             if client:
                 await self._daemon.add_transport("sim", client)
-                # Wait for the TCP connection to be established before
-                # sending window commands — ensure_connected retries
-                await client.ensure_connected()
+                # Wait for the sender task to establish the TCP connection.
+                # Don't call ensure_connected() here — it races with the
+                # sender task's connect() and causes duplicate background readers.
+                for _ in range(100):  # up to 10 seconds
+                    if client.is_connected:
+                        break
+                    await asyncio.sleep(0.1)
                 prefs = load_preferences()
                 if prefs.get("sim_window_visible", True):
                     await self._sim_process.show_window()
