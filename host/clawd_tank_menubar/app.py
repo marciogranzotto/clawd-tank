@@ -39,12 +39,51 @@ class ClawdTankApp(rumps.App, DaemonObserver):
         self._transport_status: dict[str, bool] = {}
         self._notification_count = 0
         self._current_config: dict = {}
+        self._sim_process = None
 
-        # Build menu — per-transport status
-        self._ble_status_item = rumps.MenuItem("BLE: Connecting...", callback=None)
-        self._ble_status_item.set_callback(None)
-        self._sim_status_item = rumps.MenuItem("", callback=None)
-        self._sim_status_item.set_callback(None)
+        prefs = load_preferences()
+
+        # --- BLE submenu ---
+        self._ble_menu = rumps.MenuItem("BLE  \u25CB Disabled")
+        self._ble_status = rumps.MenuItem("Status: Initializing...")
+        self._ble_status.set_callback(None)
+        self._ble_enabled_toggle = rumps.MenuItem(
+            "Enabled", callback=self._on_toggle_ble_enabled
+        )
+        self._ble_enabled_toggle.state = prefs.get("ble_enabled", True)
+        self._ble_reconnect = rumps.MenuItem("Reconnect", callback=None)
+        self._ble_menu.update([
+            self._ble_status,
+            None,
+            self._ble_enabled_toggle,
+            None,
+            self._ble_reconnect,
+        ])
+
+        # --- Simulator submenu ---
+        self._sim_menu = rumps.MenuItem("Simulator  \u25CB Disabled")
+        self._sim_status = rumps.MenuItem("Status: Initializing...")
+        self._sim_status.set_callback(None)
+        self._sim_enabled_toggle = rumps.MenuItem(
+            "Enabled", callback=self._on_toggle_sim_enabled
+        )
+        self._sim_enabled_toggle.state = prefs.get("sim_enabled", True)
+        self._sim_window_toggle = rumps.MenuItem(
+            "Show Window", callback=None
+        )
+        self._sim_window_toggle.state = prefs.get("sim_window_visible", True)
+        self._sim_pinned_toggle = rumps.MenuItem(
+            "Always on Top", callback=None
+        )
+        self._sim_pinned_toggle.state = prefs.get("sim_always_on_top", True)
+        self._sim_menu.update([
+            self._sim_status,
+            None,
+            self._sim_enabled_toggle,
+            None,
+            self._sim_window_toggle,
+            self._sim_pinned_toggle,
+        ])
 
         # Brightness slider — rumps MenuItem with custom NSView
         self._brightness_slider = create_slider_menu_item(
@@ -64,11 +103,6 @@ class ClawdTankApp(rumps.App, DaemonObserver):
                 item.state = True
             self._session_timeout_menu.add(item)
 
-        # Simulator toggle
-        self._sim_toggle = rumps.MenuItem("Enable Simulator", callback=self._on_toggle_simulator)
-        prefs = load_preferences()
-        self._sim_toggle.state = prefs.get("sim_enabled", False)
-
         # Claude Code hooks
         self._hooks_item = rumps.MenuItem(
             "Install Claude Code Hooks",
@@ -83,27 +117,19 @@ class ClawdTankApp(rumps.App, DaemonObserver):
         )
         self._login_item.state = launchd.is_enabled()
 
-        # Reconnect
-        self._reconnect_item = rumps.MenuItem("Reconnect", callback=self._on_reconnect)
-
         # Quit
         self._quit_item = rumps.MenuItem("Quit Clawd Tank", callback=self._on_quit)
 
         # Assemble menu
         self.menu = [
-            self._ble_status_item,
-            self._sim_status_item,
+            self._ble_menu,
+            self._sim_menu,
             None,
             self._brightness_item,
-            None,
             self._session_timeout_menu,
-            None,
-            self._sim_toggle,
             None,
             self._hooks_item,
             self._login_item,
-            None,
-            self._reconnect_item,
             None,
             self._quit_item,
         ]
@@ -134,13 +160,19 @@ class ClawdTankApp(rumps.App, DaemonObserver):
         thread.start()
         self._loop_ready.wait(timeout=5)
 
-        # Enable sim transport if preference is set
-        if self._sim_toggle.state and self._loop:
-            self._transport_status["sim"] = False
-            client = SimClient(port=SIM_DEFAULT_PORT)
+        # Create transports based on preferences
+        prefs = load_preferences()
+
+        if prefs.get("ble_enabled", True):
+            from clawd_tank_daemon.ble_client import ClawdBleClient
+            client = ClawdBleClient()
+            self._transport_status["ble"] = False
             asyncio.run_coroutine_threadsafe(
-                self._daemon.add_transport("sim", client), self._loop
+                self._daemon.add_transport("ble", client), self._loop
             )
+
+        if prefs.get("sim_enabled", True):
+            self._start_simulator()
 
     # --- DaemonObserver callbacks (called from asyncio thread) ---
 
@@ -179,16 +211,39 @@ class ClawdTankApp(rumps.App, DaemonObserver):
         """Update all menu items based on current state. Must run on main thread."""
         connected = self._connected
 
-        # Per-transport status
-        ble_connected = self._transport_status.get("ble", False)
-        self._ble_status_item.title = f"BLE: {'Connected' if ble_connected else 'Connecting...'}"
-
-        if "sim" in self._transport_status:
-            sim_connected = self._transport_status.get("sim", False)
-            self._sim_status_item.title = f"Simulator: {'Connected' if sim_connected else 'Connecting...'}"
+        # --- BLE submenu state ---
+        if not self._ble_enabled_toggle.state:
+            self._ble_menu.title = "BLE  \u25CB Disabled"
+            self._ble_status.title = "Status: Disabled"
+            self._ble_reconnect.set_callback(None)
         else:
-            self._sim_status_item.title = ""
+            ble_connected = self._transport_status.get("ble", False)
+            if ble_connected:
+                self._ble_menu.title = "BLE  \u25CF Connected"
+                self._ble_status.title = "Status: Connected"
+            else:
+                self._ble_menu.title = "BLE  \u25CF Connecting..."
+                self._ble_status.title = "Status: Connecting..."
+            self._ble_reconnect.set_callback(self._on_reconnect)
 
+        # --- Simulator submenu state ---
+        if not self._sim_enabled_toggle.state:
+            self._sim_menu.title = "Simulator  \u25CB Disabled"
+            self._sim_status.title = "Status: Disabled"
+            self._sim_window_toggle.set_callback(None)
+            self._sim_pinned_toggle.set_callback(None)
+        else:
+            sim_connected = self._transport_status.get("sim", False)
+            if sim_connected:
+                self._sim_menu.title = "Simulator  \u25CF Running"
+                self._sim_status.title = "Status: Running"
+            else:
+                self._sim_menu.title = "Simulator  \u25CF Connecting..."
+                self._sim_status.title = "Status: Connecting..."
+            self._sim_window_toggle.set_callback(self._on_toggle_sim_window)
+            self._sim_pinned_toggle.set_callback(self._on_toggle_sim_pinned)
+
+        # --- Icon and global state ---
         if connected:
             if self._notification_count > 0:
                 self.icon = self._icon_path("crab-notifications")
@@ -203,12 +258,9 @@ class ClawdTankApp(rumps.App, DaemonObserver):
             self._session_timeout_value = timeout
             for key, item in self._session_timeout_menu.items():
                 item.state = (item._seconds == timeout)
-
-            self._reconnect_item.set_callback(self._on_reconnect)
         else:
             self.icon = self._icon_path("crab-disconnected")
             self._brightness_slider.set_enabled(False)
-            self._reconnect_item.set_callback(None)
         self.title = ""
 
     def _icon_path(self, name: str) -> Optional[str]:
@@ -250,6 +302,75 @@ class ClawdTankApp(rumps.App, DaemonObserver):
             if self._daemon:
                 self._daemon.set_session_timeout(seconds)
 
+    def _on_toggle_ble_enabled(self, sender):
+        """Toggle BLE transport on/off."""
+        sender.state = not sender.state
+        save_preferences(updates={"ble_enabled": sender.state})
+
+        if sender.state:
+            # Enable: create BLE client and add transport
+            from clawd_tank_daemon.ble_client import ClawdBleClient
+            client = ClawdBleClient()
+            self._transport_status["ble"] = False
+            self._schedule_menu_update()
+            if self._loop and self._daemon:
+                asyncio.run_coroutine_threadsafe(
+                    self._daemon.add_transport("ble", client), self._loop
+                )
+        else:
+            # Disable: remove transport
+            self._transport_status.pop("ble", None)
+            self._schedule_menu_update()
+            if self._loop and self._daemon:
+                asyncio.run_coroutine_threadsafe(
+                    self._daemon.remove_transport("ble"), self._loop
+                )
+
+    def _on_toggle_sim_enabled(self, sender):
+        """Toggle simulator transport on/off."""
+        sender.state = not sender.state
+        save_preferences(updates={"sim_enabled": sender.state})
+
+        if sender.state:
+            self._start_simulator()
+            self._schedule_menu_update()
+        else:
+            self._stop_simulator()
+            self._schedule_menu_update()
+
+    def _on_toggle_sim_window(self, sender):
+        """Toggle simulator window visibility."""
+        sender.state = not sender.state
+        save_preferences(updates={"sim_window_visible": sender.state})
+
+        if self._sim_process and self._loop:
+            if sender.state:
+                asyncio.run_coroutine_threadsafe(
+                    self._sim_process.show_window(), self._loop
+                )
+            else:
+                asyncio.run_coroutine_threadsafe(
+                    self._sim_process.hide_window(), self._loop
+                )
+
+    def _on_toggle_sim_pinned(self, sender):
+        """Toggle simulator always-on-top."""
+        sender.state = not sender.state
+        save_preferences(updates={"sim_always_on_top": sender.state})
+
+        if self._sim_process and self._loop:
+            asyncio.run_coroutine_threadsafe(
+                self._sim_process.set_pinned(sender.state), self._loop
+            )
+
+    def _on_sim_window_event(self, event: dict):
+        """Handle events from the simulator process (e.g. window_hidden)."""
+        event_type = event.get("event")
+        if event_type == "window_hidden":
+            self._sim_window_toggle.state = False
+            save_preferences(updates={"sim_window_visible": False})
+            self._schedule_menu_update()
+
     def _on_install_hooks(self, sender):
         was_installed = hooks.are_hooks_installed()
         hooks.install_notify_script()
@@ -275,36 +396,51 @@ class ClawdTankApp(rumps.App, DaemonObserver):
             launchd.enable()
         sender.state = launchd.is_enabled()
 
-    def _on_toggle_simulator(self, sender):
-        """Toggle the simulator transport on/off."""
-        sender.state = not sender.state
-        save_preferences(updates={"sim_enabled": sender.state})
-
-        if sender.state:
-            self._transport_status["sim"] = False
-            self._schedule_menu_update()
-            if self._loop and self._daemon:
-                client = SimClient(port=SIM_DEFAULT_PORT)
-                asyncio.run_coroutine_threadsafe(
-                    self._daemon.add_transport("sim", client), self._loop
-                )
-        else:
-            self._transport_status.pop("sim", None)
-            self._schedule_menu_update()
-            if self._loop and self._daemon:
-                asyncio.run_coroutine_threadsafe(
-                    self._daemon.remove_transport("sim"), self._loop
-                )
-
     def _on_reconnect(self, _):
         if self._loop:
             asyncio.run_coroutine_threadsafe(
                 self._daemon.reconnect(), self._loop
             )
 
+    # --- Simulator lifecycle ---
+
+    def _start_simulator(self):
+        """Start the simulator process and add it as a transport."""
+        from clawd_tank_daemon.sim_process import SimProcessManager
+        self._sim_process = SimProcessManager(on_window_event=self._on_sim_window_event)
+        self._transport_status["sim"] = False
+
+        async def _do_start():
+            client = await self._sim_process.start()
+            if client:
+                await self._daemon.add_transport("sim", client)
+                prefs = load_preferences()
+                if prefs.get("sim_window_visible", True):
+                    await self._sim_process.show_window()
+                await self._sim_process.set_pinned(prefs.get("sim_always_on_top", True))
+
+        if self._loop and self._daemon:
+            asyncio.run_coroutine_threadsafe(_do_start(), self._loop)
+
+    def _stop_simulator(self):
+        """Stop the simulator process and remove it as a transport."""
+        async def _do_stop():
+            await self._daemon.remove_transport("sim")
+            if self._sim_process:
+                await self._sim_process.stop()
+                self._sim_process = None
+            self._transport_status.pop("sim", None)
+
+        if self._loop and self._daemon:
+            asyncio.run_coroutine_threadsafe(_do_stop(), self._loop)
+
     def _on_quit(self, _):
         try:
             if self._loop and self._daemon:
+                if self._sim_process:
+                    asyncio.run_coroutine_threadsafe(
+                        self._sim_process.stop(), self._loop
+                    )
                 future = asyncio.run_coroutine_threadsafe(
                     self._daemon._shutdown(), self._loop
                 )
