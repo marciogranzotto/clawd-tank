@@ -24,6 +24,8 @@ static bool     opt_screenshot_on_event = false;
 static uint32_t opt_run_ms = 0;
 static int      opt_listen_port = 0;  /* 0 = disabled */
 static bool     opt_pinned = false;
+static bool     opt_hidden = false;   /* start with window hidden */
+static bool     opt_bordered = false; /* use a normal bordered window */
 static const char *opt_capture_anim = NULL;  /* status name for --capture-anim */
 static const char *opt_capture_dir = NULL;   /* output dir for --capture-anim */
 
@@ -36,6 +38,8 @@ static void print_usage(void)
         "  --headless              Run without SDL2 window\n"
         "  --scale <N>             Window scale factor (default: 2)\n"
         "  --pinned                Keep window always on top\n"
+        "  --hidden                Start with window hidden (show via TCP show_window)\n"
+        "  --bordered              Use a normal bordered window (default: borderless)\n"
         "  --capture-anim <status> <dir>  Capture one animation cycle as PNGs\n"
         "\n"
         "Events:\n"
@@ -75,6 +79,10 @@ static void parse_args(int argc, char *argv[])
             opt_run_ms = (uint32_t)atoi(argv[++i]);
         } else if (strcmp(argv[i], "--pinned") == 0) {
             opt_pinned = true;
+        } else if (strcmp(argv[i], "--hidden") == 0) {
+            opt_hidden = true;
+        } else if (strcmp(argv[i], "--bordered") == 0) {
+            opt_bordered = true;
         } else if (strcmp(argv[i], "--capture-anim") == 0 && i + 2 < argc) {
             opt_capture_anim = argv[++i];
             opt_capture_dir = argv[++i];
@@ -121,6 +129,9 @@ static void capture_on_event(uint32_t time_ms, const char *suffix)
                            time_ms, suffix);
 }
 
+/* Forward declaration — window command handler defined below */
+static void handle_window_cmd(const sim_win_cmd_t *cmd);
+
 /* ---- Headless main loop ---- */
 
 static void run_headless(void)
@@ -153,9 +164,10 @@ static void run_headless(void)
         /* Fire any due events */
         bool event_fired = sim_events_process(time);
 
-        /* Process TCP socket events */
+        /* Process TCP socket events and window commands */
         if (opt_listen_port > 0) {
             sim_socket_process();
+            sim_socket_process_window_cmds(handle_window_cmd);
         }
 
         /* Advance simulated timers (drives RGB LED animation) */
@@ -248,6 +260,24 @@ static void run_capture_anim(void)
     printf("frame_ms=%d\n", frame_ms);  /* machine-readable for the GIF script */
 }
 
+/* ---- Window command handler ---- */
+
+static void handle_window_cmd(const sim_win_cmd_t *cmd)
+{
+    switch (cmd->type) {
+    case SIM_WIN_CMD_SHOW:
+        sim_display_show_window();
+        sim_display_clear_quit();
+        break;
+    case SIM_WIN_CMD_HIDE:
+        sim_display_hide_window();
+        break;
+    case SIM_WIN_CMD_SET_PINNED:
+        sim_display_set_pinned(cmd->pinned);
+        break;
+    }
+}
+
 /* ---- Interactive main loop ---- */
 
 /* Forward declaration — keyboard handler defined below */
@@ -259,23 +289,33 @@ static void run_interactive(void)
            opt_scale);
 
     while (!sim_display_should_quit()) {
-        handle_sdl_events();
+        if (sim_display_is_hidden()) {
+            /* Window is hidden: pump SDL minimally to avoid CPU spin,
+             * process TCP commands, but skip rendering. */
+            SDL_PumpEvents();
+        } else {
+            handle_sdl_events();
+        }
 
         /* Process scripted events if any (using wall time) */
         if (opt_events || opt_scenario) {
             sim_events_process(SDL_GetTicks());
         }
 
-        /* Process TCP socket events */
+        /* Process TCP socket events and window commands */
         if (opt_listen_port > 0) {
             sim_socket_process();
+            sim_socket_process_window_cmds(handle_window_cmd);
         }
 
         /* Advance simulated timers (drives RGB LED animation) */
         sim_timers_tick(TICK_MS);
 
         ui_manager_tick();
-        sim_display_tick();  /* present to SDL window */
+
+        if (!sim_display_is_hidden()) {
+            sim_display_tick();  /* present to SDL window */
+        }
 
         SDL_Delay(TICK_MS);
     }
@@ -299,14 +339,24 @@ static void handle_sdl_events(void)
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
         if (e.type == SDL_QUIT) {
-            sim_display_set_quit();
+            if (opt_listen_port > 0) {
+                sim_display_hide_window();
+                sim_socket_send_event("{\"event\":\"window_hidden\"}");
+            } else {
+                sim_display_set_quit();
+            }
             return;
         }
         if (e.type == SDL_KEYDOWN) {
             switch (e.key.keysym.sym) {
             case SDLK_q:
             case SDLK_ESCAPE:
-                sim_display_set_quit();
+                if (opt_listen_port > 0) {
+                    sim_display_hide_window();
+                    sim_socket_send_event("{\"event\":\"window_hidden\"}");
+                } else {
+                    sim_display_set_quit();
+                }
                 return;
 
             case SDLK_c: {
@@ -377,11 +427,14 @@ int main(int argc, char *argv[])
 {
     parse_args(argc, argv);
 
+    /* headless takes precedence over hidden (hidden is meaningless without a window) */
+    if (opt_headless && opt_hidden) opt_hidden = false;
+
     /* 1. Init LVGL */
     lv_init();
 
     /* 2. Init display */
-    sim_display_init(opt_headless, opt_scale, false);
+    sim_display_init(opt_headless, opt_scale, opt_bordered);
 
     /* 3. Init events */
     if (opt_events) sim_events_init_inline(opt_events);
@@ -401,6 +454,11 @@ int main(int argc, char *argv[])
     /* 4b. Apply pinned mode */
     if (opt_pinned) {
         sim_display_set_pinned(true);
+    }
+
+    /* 4c. Apply hidden mode */
+    if (opt_hidden) {
+        sim_display_hide_window();
     }
 
     /* 5. Init screenshots */
