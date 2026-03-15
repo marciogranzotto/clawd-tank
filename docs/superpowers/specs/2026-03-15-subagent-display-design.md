@@ -216,11 +216,20 @@ A new LVGL layer on top of the scene for:
 
 #### Transition Animations
 
-When session count changes:
-- **Clawd appears:** Fades in over 400ms (matching existing `SCENE_ANIM_MS`)
-- **Clawd disappears:** Fades out over 400ms
-- **Remaining Clawds reposition:** Slide to new positions over 400ms with ease-out (using LVGL's `lv_anim_t`)
-- **HUD counter appears/disappears:** Instant show/hide (no animation — it's a small HUD element)
+When a **new session starts** (Clawd enters):
+1. New Clawd appears off-screen to the right (x > 320) playing a **walking animation**
+2. All existing Clawds switch to the walking animation and slide toward their new X positions (LVGL `lv_anim_t`, ease-out, ~600ms)
+3. The new Clawd walks in from the right to its target X position over the same duration
+4. Once all Clawds reach their positions, each switches to its session-state animation (typing, thinking, etc.)
+
+When a **session ends** (Clawd exits):
+1. The departing Clawd fades out over 400ms (opacity → 0)
+2. Remaining Clawds switch to walking animation and slide to their new X positions (~600ms, ease-out)
+3. Once in position, each resumes its session-state animation
+
+**Walking animation:** A new sprite showing Clawd walking sideways (legs shuffling, body bobbing). Needs to be created as a new sprite asset. If not yet available, fall back to sliding the current animation without switching to a walk cycle.
+
+**HUD counter changes:** Instant show/hide — no animation needed for HUD elements.
 
 ### Daemon Changes
 
@@ -274,7 +283,7 @@ When transitioning between full screen (320px) and narrow (107px, notifications 
 
 ### Edge Cases
 
-- **Session ends while Clawd is visible:** Fade out that Clawd, slide remaining ones to new positions (400ms)
+- **Session ends while Clawd is visible:** Fade out that Clawd, remaining ones walk to new positions (~600ms)
 - **Subagent count changes rapidly:** No debounce needed — the HUD counter is just a number redraw, cheap
 - **All subagents stop:** Hide the HUD counter instantly
 - **0 sessions (sleeping):** No Clawds, no HUD, sleeping animation as today
@@ -283,7 +292,12 @@ When transitioning between full screen (320px) and narrow (107px, notifications 
 
 ### New Sprites & Assets
 
-1. **Mini-crab sprite** (~16×16 at original scale)
+1. **Clawd walking sprite** (same size as other Clawd animations, ~180×180)
+   - Clawd walking sideways — legs shuffling, body bobbing, looking in the direction of movement
+   - Used for session entrance (walking in from right) and repositioning transitions
+   - May need both left-facing and right-facing variants, or a single direction with LVGL horizontal flip
+
+2. **Mini-crab sprite** (~16×16 at original scale)
    - `mini-crab-typing` — bouncing body, waving arms (for HUD icon)
    - Same salmon-orange (#DE886D) as Clawd, 4 small legs, tiny arms, small black eyes
    - Must go through sprite pipeline: `svg2frames.py` → `png2rgb565.py` → RLE header
