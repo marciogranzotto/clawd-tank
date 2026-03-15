@@ -4,7 +4,10 @@
 
 ### Added
 
-- **Subagent tracking** — `SubagentStart`/`SubagentStop` hooks track active Claude Code subagents per session. Sessions with active subagents are never evicted and count as "working", preventing Clawd from sleeping during long-running agent tasks.
+- **Subagent tracking** — `SubagentStart`/`SubagentStop` hooks track active Claude Code subagents per session. Sessions with active subagents count as "working", preventing Clawd from sleeping during long-running agent tasks.
+- **Auto-update hooks on startup** — Hooks are checked and updated automatically on app launch when outdated, removing the need for manual "Install Hooks" clicks after adding new hook types.
+- **Daemon health monitoring** — Daemon thread exceptions are caught and logged. Periodic health check timer (30s) detects dead daemon and shows disconnected icon.
+- **Orphaned sim process cleanup** — On startup, orphaned simulator processes on the listen port are identified by name and killed instead of silently connecting to them.
 - **Session state persistence** — Session state saved atomically to `~/.clawd-tank/sessions.json` on structural changes (state transitions, subagent add/remove). Daemon loads saved state on startup with immediate stale eviction, so restarting the app preserves the correct animation.
 - **Simulator logging** — Simulator stdout/stderr routed through Python logger to unified `clawd-tank.log` with `[clawd-tank.sim-process]` tag.
 - **Build script** — `host/build.sh` automates static simulator build, py2app, binary bundling, and optional install (`--install`).
@@ -20,6 +23,9 @@
 - **Quit handler race condition** — Sim transport is now removed from daemon before killing the process, avoiding double-disconnect. Sim process is SIGKILL'd immediately instead of waiting 3s for SIGTERM.
 - **Session file double-close** — Fixed fd double-close in `save_sessions` error path that could leave orphaned temp files.
 - **Test pollution** — Added `conftest.py` with autouse fixture to redirect session persistence to temp dirs, preventing tests from writing to real `~/.clawd-tank/sessions.json`.
+- **Stale subagent eviction** — Sessions with dead subagents (missed `SubagentStop` hooks) are now evicted normally by staleness checker, since active subagents keep `last_event` fresh via tool call hooks.
+- **Stale launchd plist** — Auto-migrates the Launch at Login plist when it points to a different executable, instead of warning the user to manually re-enable.
+- **Display state sync** — `_last_display_state` updated after transport replay to prevent duplicate broadcasts.
 
 ## [1.1.0] - 2026-03-14
 
