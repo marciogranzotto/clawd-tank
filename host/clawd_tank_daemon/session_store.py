@@ -48,8 +48,13 @@ def load_sessions(path: Path = SESSIONS_PATH) -> dict[str, dict]:
                 continue
             if "state" not in state or "last_event" not in state:
                 continue
+            if not isinstance(state["last_event"], (int, float)):
+                continue
             if "subagents" in state:
-                state["subagents"] = set(state["subagents"])
+                if not isinstance(state["subagents"], list):
+                    del state["subagents"]
+                else:
+                    state["subagents"] = set(state["subagents"])
             valid[sid] = state
         return valid
     except (FileNotFoundError, json.JSONDecodeError, OSError, ValueError):

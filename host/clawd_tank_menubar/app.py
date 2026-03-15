@@ -476,8 +476,7 @@ class ClawdTankApp(rumps.App, DaemonObserver):
             if self._loop and self._daemon:
                 async def _shutdown_all():
                     # Remove sim transport from daemon first (avoids double-disconnect)
-                    if "sim" in self._daemon._transports:
-                        await self._daemon.remove_transport("sim")
+                    await self._daemon.remove_transport("sim")
                     # Kill sim process (client already disconnected, just kill the process)
                     if self._sim_process:
                         await self._sim_process.kill()
