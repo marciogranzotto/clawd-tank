@@ -213,6 +213,9 @@ class ClawdDaemon:
             self._session_states.setdefault(session_id, {"state": "idle", "last_event": now})
             if hook == "Stop":
                 self._session_states[session_id]["state"] = "idle"
+                # Clear subagents — if Claude stopped, all subagents are done.
+                # Handles missed SubagentStop hooks (daemon restart, worktree agents).
+                self._session_states[session_id].pop("subagents", None)
             elif hook == "Notification":
                 self._session_states[session_id]["state"] = "confused"
             self._session_states[session_id]["last_event"] = now

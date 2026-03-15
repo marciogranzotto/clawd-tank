@@ -345,8 +345,7 @@ def test_working_session_with_subagents_counts_once():
 
 @pytest.mark.asyncio
 async def test_subagent_lifecycle_prevents_sleeping():
-    """Full lifecycle: session starts, spawns subagent, parent goes idle,
-    subagent stops, then session can be evicted."""
+    """Full lifecycle: subagent keeps session working, Stop clears subagents."""
     d = make_daemon()
 
     # Session starts and begins working
@@ -356,26 +355,30 @@ async def test_subagent_lifecycle_prevents_sleeping():
     await d._handle_message({"event": "tool_use", "session_id": "s1"})
     assert d._compute_display_state() == "working_1"
 
-    # Subagent spawned
+    # Subagent spawned — session stays working
     await d._handle_message({"event": "subagent_start", "session_id": "s1", "agent_id": "a1"})
     assert d._compute_display_state() == "working_1"
+    assert "a1" in d._session_states["s1"]["subagents"]
 
-    # Parent goes idle (Stop hook fires) — but subagent still running
+    # Subagent keeps session alive during staleness check
+    d._session_staleness_timeout = 0
+    d._evict_stale_sessions()
+    assert "s1" in d._session_states
+
+    # Subagent finishes via SubagentStop
+    await d._handle_message({"event": "subagent_stop", "session_id": "s1", "agent_id": "a1"})
+    assert not d._session_states["s1"].get("subagents")
+
+    # Session back to working (tool_use still active)
+    assert d._compute_display_state() == "working_1"
+
+    # Stop fires — session goes idle, subagents cleared
     await d._handle_message({
         "event": "add", "hook": "Stop", "session_id": "s1",
         "project": "proj", "message": "Waiting",
     })
-    # Session state is "idle" but subagent keeps it counted as working
     assert d._session_states["s1"]["state"] == "idle"
-    assert d._compute_display_state() == "working_1"
-
-    # Staleness check — should NOT evict (subagent active)
-    d._session_staleness_timeout = 0  # force everything to be "stale"
-    d._evict_stale_sessions()
-    assert "s1" in d._session_states
-
-    # Subagent finishes
-    await d._handle_message({"event": "subagent_stop", "session_id": "s1", "agent_id": "a1"})
+    assert "subagents" not in d._session_states["s1"]
     assert d._compute_display_state() == "idle"
 
     # Now staleness check CAN evict
@@ -383,6 +386,23 @@ async def test_subagent_lifecycle_prevents_sleeping():
     d._evict_stale_sessions()
     assert "s1" not in d._session_states
     assert d._compute_display_state() == "sleeping"
+
+
+@pytest.mark.asyncio
+async def test_stop_clears_stale_subagents():
+    """Stop hook clears subagents even if SubagentStop was missed."""
+    d = make_daemon()
+    d._session_states["s1"] = {
+        "state": "working", "last_event": time.time(),
+        "subagents": {"orphan1", "orphan2"},
+    }
+    await d._handle_message({
+        "event": "add", "hook": "Stop", "session_id": "s1",
+        "project": "proj", "message": "Waiting",
+    })
+    assert d._session_states["s1"]["state"] == "idle"
+    assert "subagents" not in d._session_states["s1"]
+    assert d._compute_display_state() == "idle"
 
 
 # --- Session state persistence ---
