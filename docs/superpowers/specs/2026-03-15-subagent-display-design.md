@@ -293,9 +293,9 @@ When transitioning between full screen (320px) and narrow (107px, notifications 
 ### New Sprites & Assets
 
 1. **Clawd walking sprite** (same size as other Clawd animations, ~180×180)
-   - Clawd walking sideways — legs shuffling, body bobbing, looking in the direction of movement
-   - Used for session entrance (walking in from right) and repositioning transitions
-   - May need both left-facing and right-facing variants, or a single direction with LVGL horizontal flip
+   - Clawd walking left — legs shuffling, body bobbing, looking left
+   - Used for session entrance and repositioning transitions
+   - Only left-facing variant needed; right-facing is achieved at runtime via LVGL horizontal flip (`lv_image_set_rotation()` or `lv_image_set_scale_x(-1)` / transform flag)
 
 2. **Mini-crab sprite** (~16×16 at original scale)
    - `mini-crab-typing` — bouncing body, waving arms (for HUD icon)
