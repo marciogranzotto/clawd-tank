@@ -11,6 +11,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Fetch LVGL (managed component not in git)
+        run: |
+          mkdir -p firmware/managed_components
+          git clone --depth 1 https://github.com/lvgl/lvgl.git firmware/managed_components/lvgl__lvgl
+          cd firmware/managed_components/lvgl__lvgl
+          git fetch --depth 1 origin 85aa60d18b3d5e5588d7b247abf90198f07c8a63
+          git checkout 85aa60d18b3d5e5588d7b247abf90198f07c8a63
+
       - name: Build simulator
         run: |
           cd simulator
