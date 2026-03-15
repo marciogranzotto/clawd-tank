@@ -385,7 +385,7 @@ scene_t *scene_create(lv_obj_t *parent)
     s->time_label = lv_label_create(s->container);
     lv_obj_set_style_text_font(s->time_label, &lv_font_montserrat_18, 0);
     lv_obj_set_style_text_color(s->time_label, lv_color_hex(0x4466aa), 0);
-    lv_obj_align(s->time_label, LV_ALIGN_TOP_RIGHT, -6, 4);
+    lv_obj_align(s->time_label, LV_ALIGN_TOP_MID, 0, 4);
     lv_label_set_text(s->time_label, "");
     lv_obj_add_flag(s->time_label, LV_OBJ_FLAG_HIDDEN);
 

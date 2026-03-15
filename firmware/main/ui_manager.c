@@ -231,6 +231,24 @@ void ui_manager_handle_event(const ble_evt_t *evt)
         s_last_activity_tick = lv_tick_get();
         break;
 
+    case BLE_EVT_SET_SESSIONS: {
+        ESP_LOGI(TAG, "Set sessions: %d anims, %d subagents, %d overflow",
+                 evt->session_anim_count, evt->subagent_count, evt->session_overflow);
+
+        /* Wake from sleep if needed */
+        if (s_display_status == DISPLAY_STATUS_SLEEPING) {
+            display_set_brightness(config_store_get_brightness());
+        }
+        s_display_status = DISPLAY_STATUS_IDLE;
+
+        scene_set_sessions(s_scene,
+            evt->session_anims, evt->session_ids,
+            evt->session_anim_count, evt->subagent_count, evt->session_overflow);
+
+        s_last_activity_tick = lv_tick_get();
+        break;
+    }
+
     case BLE_EVT_SET_STATUS: {
         display_status_t new_status = (display_status_t)evt->status;
         ESP_LOGI(TAG, "Set status: %d", new_status);
