@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Optional, Protocol, runtime_checkable
 
 from .ble_client import ClawdBleClient
-from .protocol import daemon_message_to_ble_payload, display_state_to_ble_payload
+from .protocol import daemon_message_to_ble_payload, display_state_to_ble_payload, display_state_to_v1_payload
 from .sim_client import SimClient, SIM_DEFAULT_PORT
 from .socket_server import SocketServer
 from .transport import TransportClient
@@ -131,6 +131,7 @@ class ClawdDaemon:
         self._session_order: list[tuple[str, int]] = loaded_order
         self._next_display_id: int = loaded_next_id
         self._last_display_state: dict = {"status": "sleeping"}
+        self._transport_versions: dict[str, int] = {}  # transport_name → protocol version
         self._session_staleness_timeout: float = 600.0
         self._evict_stale_sessions()
 
@@ -156,9 +157,13 @@ class ClawdDaemon:
                 if transport.is_connected:
                     await transport.write_notification(sweeping_payload)
             computed = self._compute_display_state()
-            fallback_payload = display_state_to_ble_payload(computed)
-            for transport in self._transports.values():
+            for name, transport in self._transports.items():
                 if transport.is_connected:
+                    version = self._transport_versions.get(name, 1)
+                    if version >= 2:
+                        fallback_payload = display_state_to_ble_payload(computed)
+                    else:
+                        fallback_payload = display_state_to_v1_payload(computed)
                     await transport.write_notification(fallback_payload)
             self._last_display_state = computed
 
@@ -304,9 +309,13 @@ class ClawdDaemon:
         if new_state == self._last_display_state:
             return
         self._last_display_state = new_state
-        payload = display_state_to_ble_payload(new_state)
-        for transport in self._transports.values():
+        for name, transport in self._transports.items():
             if transport.is_connected:
+                version = self._transport_versions.get(name, 1)
+                if version >= 2:
+                    payload = display_state_to_ble_payload(new_state)
+                else:
+                    payload = display_state_to_v1_payload(new_state)
                 await transport.write_notification(payload)
 
     async def _staleness_checker(self) -> None:
@@ -322,6 +331,9 @@ class ClawdDaemon:
     def _on_transport_connect(self, name: str) -> None:
         """Called by a transport client on successful connection."""
         logger.info("Transport '%s' connected", name)
+        # Simulator always supports latest protocol; BLE defaults to v1
+        if name.startswith("sim"):
+            self._transport_versions[name] = 2
         if self._observer:
             self._observer.on_connection_change(True, name)
 
@@ -346,7 +358,7 @@ class ClawdDaemon:
         await transport.write_notification(payload)
         logger.info("Synced time: epoch %d, tz %s", epoch, tz)
 
-    async def _replay_active_for(self, transport) -> None:
+    async def _replay_active_for(self, transport, name: str = "") -> None:
         """Replay all active notifications to a transport after reconnect."""
         logger.info("Replaying %d active notifications", len(self._active_notifications))
         for msg in list(self._active_notifications.values()):
@@ -362,7 +374,11 @@ class ClawdDaemon:
         # Send current display state
         state = self._compute_display_state()
         self._last_display_state = state
-        status_payload = display_state_to_ble_payload(state)
+        version = self._transport_versions.get(name, 1)
+        if version >= 2:
+            status_payload = display_state_to_ble_payload(state)
+        else:
+            status_payload = display_state_to_v1_payload(state)
         await transport.write_notification(status_payload)
 
     async def _transport_sender(self, name: str) -> None:
@@ -373,7 +389,7 @@ class ClawdDaemon:
         await transport.ensure_connected()
         if transport.is_connected:
             await self._sync_time_for(transport)
-            await self._replay_active_for(transport)
+            await self._replay_active_for(transport, name)
         while self._running:
             try:
                 msg = await asyncio.wait_for(queue.get(), timeout=1.0)
@@ -399,7 +415,7 @@ class ClawdDaemon:
                 await transport.ensure_connected()
                 if not was_connected and transport.is_connected:
                     await self._sync_time_for(transport)
-                await self._replay_active_for(transport)
+                await self._replay_active_for(transport, name)
 
     def _write_pid(self) -> None:
         PID_PATH.parent.mkdir(parents=True, exist_ok=True)

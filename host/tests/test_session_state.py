@@ -198,6 +198,7 @@ async def test_compact_triggers_sweeping():
     transport.is_connected = True
     d._transports["test"] = transport
     d._transport_queues["test"] = asyncio.Queue()
+    d._transport_versions["test"] = 2  # v2 transport to get set_sessions
     d._last_display_state = {"anims": ["typing"], "ids": [1], "subagents": 0}
 
     await d._handle_message({"event": "compact", "session_id": "s1"})
@@ -669,3 +670,63 @@ async def test_display_state_middle_session_removed():
     state = d._compute_display_state()
     assert state["anims"] == ["typing", "typing"]
     assert state["ids"] == [1, 3]  # id 2 gone, others preserved
+
+
+# --- Per-transport protocol versioning ---
+
+
+@pytest.mark.asyncio
+async def test_v1_transport_gets_set_status():
+    """V1 transport should receive legacy set_status format."""
+    d = make_daemon()
+    transport = AsyncMock()
+    transport.is_connected = True
+    d._transports["ble"] = transport
+    d._transport_queues["ble"] = asyncio.Queue()
+    d._transport_versions["ble"] = 1
+
+    await d._handle_message({"event": "session_start", "session_id": "s1"})
+    await d._handle_message({"event": "tool_use", "session_id": "s1"})
+
+    calls = transport.write_notification.call_args_list
+    payloads = [json.loads(c[0][0]) for c in calls]
+    # Should have received set_status (v1 format), not set_sessions
+    status_payloads = [p for p in payloads if p.get("action") == "set_status"]
+    assert any(p["status"].startswith("working") for p in status_payloads)
+    assert not any(p.get("action") == "set_sessions" for p in payloads)
+
+
+@pytest.mark.asyncio
+async def test_v2_transport_gets_set_sessions():
+    """V2 transport should receive set_sessions format."""
+    d = make_daemon()
+    transport = AsyncMock()
+    transport.is_connected = True
+    d._transports["sim"] = transport
+    d._transport_queues["sim"] = asyncio.Queue()
+    d._transport_versions["sim"] = 2
+
+    await d._handle_message({"event": "session_start", "session_id": "s1"})
+    await d._handle_message({"event": "tool_use", "session_id": "s1"})
+
+    calls = transport.write_notification.call_args_list
+    payloads = [json.loads(c[0][0]) for c in calls]
+    session_payloads = [p for p in payloads if p.get("action") == "set_sessions"]
+    assert len(session_payloads) > 0
+    assert session_payloads[-1]["anims"] == ["typing"]
+
+
+@pytest.mark.asyncio
+async def test_sim_transport_auto_sets_v2():
+    """Simulator transport auto-sets to v2 on connect."""
+    d = make_daemon()
+    d._on_transport_connect("sim")
+    assert d._transport_versions.get("sim") == 2
+
+
+@pytest.mark.asyncio
+async def test_ble_transport_defaults_v1():
+    """BLE transport defaults to v1 (no auto-set)."""
+    d = make_daemon()
+    d._on_transport_connect("ble")
+    assert d._transport_versions.get("ble") is None  # defaults to 1 via .get(name, 1)
