@@ -170,6 +170,17 @@ static const anim_def_t anim_defs[] = {
         .height = SWEEPING_HEIGHT,
         .y_offset = 8,
     },
+    [CLAWD_ANIM_WALKING] = {
+        /* Placeholder — reuses idle sprite until walking sprite is created */
+        .rle_data = idle_rle_data,
+        .frame_offsets = idle_frame_offsets,
+        .frame_count = IDLE_FRAME_COUNT,
+        .frame_ms = IDLE_FRAME_MS,
+        .looping = true,
+        .width = IDLE_WIDTH,
+        .height = IDLE_HEIGHT,
+        .y_offset = 8,
+    },
 };
 
 /* ---------- Multi-slot support ---------- */
@@ -275,6 +286,28 @@ static uint32_t random_range(uint32_t min_val, uint32_t max_val)
 static void width_anim_cb(void *var, int32_t val)
 {
     lv_obj_set_width((lv_obj_t *)var, val);
+}
+
+/* ---------- Animation helpers for transitions ---------- */
+
+static void set_sprite_opa(void *obj, int32_t v) {
+    lv_obj_set_style_opa(obj, (lv_opa_t)v, 0);
+}
+
+static void fade_complete_cb(lv_anim_t *a) {
+    lv_obj_t *obj = (lv_obj_t *)a->var;
+    lv_obj_delete(obj);
+}
+
+static void slide_slot_to(clawd_slot_t *slot, int target_x, int duration_ms) {
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, slot->sprite_img);
+    lv_anim_set_values(&a, lv_obj_get_x(slot->sprite_img), target_x);
+    lv_anim_set_duration(&a, duration_ms);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_obj_set_x);
+    lv_anim_start(&a);
 }
 
 /* ---------- Slot helpers ---------- */
@@ -577,6 +610,7 @@ void scene_set_sessions(scene_t *s, const uint8_t *anims, const uint16_t *ids,
     /* Assign new slots by matching display IDs */
     for (int new_i = 0; new_i < count; new_i++) {
         int old_i = find_id_in(old_ids, old_count, ids[new_i]);
+        int cx = x_centers[count - 1][new_i];
         if (old_i >= 0 && old_slots[old_i].active) {
             /* Existing session — move slot data, update animation if changed */
             s->slots[new_i] = old_slots[old_i];
@@ -594,30 +628,42 @@ void scene_set_sessions(scene_t *s, const uint8_t *anims, const uint16_t *ids,
                 decode_and_apply_frame(&s->slots[new_i]);
             }
 
-            /* Reposition for new layout */
-            int cx = x_centers[count - 1][new_i];
+            /* Animate slide to new X position, set Y immediately */
             const anim_def_t *def = &anim_defs[s->slots[new_i].cur_anim];
-            lv_obj_set_pos(s->slots[new_i].sprite_img, cx - def->width / 2,
-                           SCENE_HEIGHT - def->height + def->y_offset);
+            int target_x = cx - def->width / 2;
+            int target_y = SCENE_HEIGHT - def->height + def->y_offset;
+            lv_obj_set_y(s->slots[new_i].sprite_img, target_y);
+            slide_slot_to(&s->slots[new_i], target_x, 600);
         } else {
-            /* New session — activate fresh */
+            /* New session — activate fresh, slide in from off-screen right */
             scene_activate_slot(s, new_i, (clawd_anim_id_t)anims[new_i]);
             s->slots[new_i].display_id = ids[new_i];
-            int cx = x_centers[count - 1][new_i];
             const anim_def_t *def = &anim_defs[anims[new_i]];
-            lv_obj_set_pos(s->slots[new_i].sprite_img, cx - def->width / 2,
-                           SCENE_HEIGHT - def->height + def->y_offset);
+            int target_x = cx - def->width / 2;
+            int target_y = SCENE_HEIGHT - def->height + def->y_offset;
+            /* Start off-screen right */
+            lv_obj_set_pos(s->slots[new_i].sprite_img, 350, target_y);
+            slide_slot_to(&s->slots[new_i], target_x, 600);
         }
     }
 
-    /* Clean up removed slots — free resources that weren't transferred */
+    /* Clean up removed slots — fade out and delete when done */
     for (int i = 0; i < MAX_SLOTS; i++) {
         if (old_slots[i].sprite_img) {
-            /* This slot wasn't transferred — hide and delete its LVGL object */
-            lv_obj_add_flag(old_slots[i].sprite_img, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_delete(old_slots[i].sprite_img);
+            /* This slot wasn't transferred — fade out over 400ms */
+            lv_anim_t a;
+            lv_anim_init(&a);
+            lv_anim_set_var(&a, old_slots[i].sprite_img);
+            lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_TRANSP);
+            lv_anim_set_duration(&a, 400);
+            lv_anim_set_exec_cb(&a, set_sprite_opa);
+            lv_anim_set_completed_cb(&a, fade_complete_cb);
+            lv_anim_start(&a);
+            /* Free frame_buf now — sprite image already has decoded pixels */
+            free(old_slots[i].frame_buf);
+        } else {
+            free(old_slots[i].frame_buf);
         }
-        free(old_slots[i].frame_buf);
     }
 
     /* Deactivate remaining slots beyond count */
