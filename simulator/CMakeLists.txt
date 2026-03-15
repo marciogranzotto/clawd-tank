@@ -54,6 +54,7 @@ add_executable(clawd-tank-sim
     ${FIRMWARE_DIR}/notification.c
     ${FIRMWARE_DIR}/config_store.c
     ${FIRMWARE_DIR}/rgb_led.c
+    ${FIRMWARE_DIR}/pixel_font.c
 )
 
 # Include path order matters:
