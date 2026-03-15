@@ -27,8 +27,6 @@
 /* ---------- Constants ---------- */
 
 #define SCENE_HEIGHT       172
-#define SPRITE_W           64
-#define SPRITE_H           64
 #define GRASS_HEIGHT       14
 #define STAR_COUNT         6
 #define STAR_TWINKLE_MIN   2000
