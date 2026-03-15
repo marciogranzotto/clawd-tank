@@ -156,6 +156,13 @@ class ClawdTankApp(rumps.App, DaemonObserver):
     def _connected(self) -> bool:
         return any(self._transport_status.values()) if self._transport_status else False
 
+    @property
+    def _daemon_alive(self) -> bool:
+        return (
+            hasattr(self, '_daemon_thread')
+            and self._daemon_thread.is_alive()
+        )
+
     # --- Lifecycle ---
 
     def _start_daemon_thread(self):
@@ -163,13 +170,17 @@ class ClawdTankApp(rumps.App, DaemonObserver):
         self._daemon = ClawdDaemon(observer=self, headless=False)
 
         def run_loop():
-            self._loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self._loop)
-            self._loop_ready.set()
-            self._loop.run_until_complete(self._daemon.run())
+            try:
+                self._loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(self._loop)
+                self._loop_ready.set()
+                self._loop.run_until_complete(self._daemon.run())
+            except Exception:
+                logger.exception("Daemon thread crashed")
+                self._loop_ready.set()  # unblock main thread if still waiting
 
-        thread = threading.Thread(target=run_loop, daemon=True)
-        thread.start()
+        self._daemon_thread = threading.Thread(target=run_loop, daemon=True)
+        self._daemon_thread.start()
         self._loop_ready.wait(timeout=5)
 
         # Create transports based on preferences
@@ -219,8 +230,17 @@ class ClawdTankApp(rumps.App, DaemonObserver):
         except ImportError:
             self._update_menu_state()
 
+    @rumps.timer(30)
+    def _health_check(self, _):
+        """Periodic check to detect daemon thread death."""
+        if not self._daemon_alive:
+            self._update_menu_state()
+
     def _update_menu_state(self):
         """Update all menu items based on current state. Must run on main thread."""
+        if not self._daemon_alive:
+            self.icon = self._icon_path("crab-disconnected")
+            return
         connected = self._connected
 
         # --- BLE submenu state ---
