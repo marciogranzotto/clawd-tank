@@ -28,6 +28,16 @@ host/build/
 host/dist/
 host/.eggs/
 
+# Simulator build artifacts
+simulator/build/
+simulator/build-static/
+
+# Firmware test binaries
+firmware/test/test_rle_decode
+
+# Screenshots
+shots/
+
 # Debug / scratch
 .debug/
 
