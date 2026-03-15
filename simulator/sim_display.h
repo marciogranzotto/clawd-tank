@@ -32,6 +32,9 @@ void sim_display_shutdown(void);
 /** Signal that the window should close. */
 void sim_display_set_quit(void);
 
+/** Enforce aspect ratio after a window resize event. */
+void sim_display_enforce_aspect_ratio(void);
+
 /** Set window always-on-top (pinned). */
 void sim_display_set_pinned(bool pinned);
 

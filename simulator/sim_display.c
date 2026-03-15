@@ -31,6 +31,9 @@ static int s_scale = 3;
 /* RGB LED color (updated by led_strip shim via sim_rgb_led_update) */
 static uint8_t s_led_r = 0, s_led_g = 0, s_led_b = 0;
 
+/* Previous window size for aspect-ratio enforcement */
+static int s_prev_w = 0, s_prev_h = 0;
+
 /* ---- RGB LED bridge (called from led_strip shim) ---- */
 
 void sim_rgb_led_update(uint8_t r, uint8_t g, uint8_t b)
@@ -138,6 +141,9 @@ lv_display_t *sim_display_init(bool headless, int scale, bool bordered)
         /* Minimum size = 1x native */
         SDL_SetWindowMinimumSize(s_window, NATIVE_W, NATIVE_H);
 
+        s_prev_w = win_w;
+        s_prev_h = win_h;
+
         if (!bordered) {
             SDL_SetWindowHitTest(s_window, hit_test_cb, NULL);
         }
@@ -192,35 +198,22 @@ void sim_display_tick(void)
     int win_w, win_h;
     SDL_GetWindowSize(s_window, &win_w, &win_h);
 
-    /* Compute the largest integer scale that fits the window while
-     * maintaining the native aspect ratio. The border scales with it. */
-    int scale_x = win_w / NATIVE_W;
-    int scale_y = win_h / NATIVE_H;
-    int scale = scale_x < scale_y ? scale_x : scale_y;
-    if (scale < 1) scale = 1;
+    /* Window aspect ratio is enforced on resize, so content always fills
+     * the entire window.  Compute border from the current scale. */
+    float scale = (float)win_w / NATIVE_W;
+    int border = (int)(LED_BORDER_PX * scale + 0.5f);
 
-    int content_w = NATIVE_W * scale;
-    int content_h = NATIVE_H * scale;
-    int offset_x = (win_w - content_w) / 2;
-    int offset_y = (win_h - content_h) / 2;
-    int border = LED_BORDER_PX * scale;
-
-    /* Fill entire window with black (letterbox bars) */
-    SDL_SetRenderDrawColor(s_renderer, 0, 0, 0, 255);
+    /* Fill entire window with LED color (border glow) */
+    SDL_SetRenderDrawColor(s_renderer, s_led_r, s_led_g, s_led_b, 255);
     SDL_RenderClear(s_renderer);
 
-    /* Fill content area with LED color (the border glow) */
-    SDL_Rect content_rect = { offset_x, offset_y, content_w, content_h };
-    SDL_SetRenderDrawColor(s_renderer, s_led_r, s_led_g, s_led_b, 255);
-    SDL_RenderFillRect(s_renderer, &content_rect);
-
-    /* Render framebuffer texture centered within the content area */
+    /* Render framebuffer texture inset by the border */
     SDL_UpdateTexture(s_texture, NULL, s_framebuffer, SIM_LCD_H_RES * sizeof(uint16_t));
     SDL_Rect dst = {
-        .x = offset_x + border,
-        .y = offset_y + border,
-        .w = SIM_LCD_H_RES * scale,
-        .h = SIM_LCD_V_RES * scale
+        .x = border,
+        .y = border,
+        .w = win_w - 2 * border,
+        .h = win_h - 2 * border
     };
     SDL_RenderCopy(s_renderer, s_texture, NULL, &dst);
 
@@ -235,6 +228,57 @@ bool sim_display_should_quit(void)
 void sim_display_set_quit(void)
 {
     s_quit = true;
+}
+
+/* ---- Aspect-ratio enforcement ---- */
+
+void sim_display_enforce_aspect_ratio(void)
+{
+    static bool s_enforcing = false;
+    if (!s_window || s_enforcing) return;
+    s_enforcing = true;
+
+    int win_w, win_h;
+    SDL_GetWindowSize(s_window, &win_w, &win_h);
+
+    /* Determine which dimension the user changed */
+    bool w_changed = (win_w != s_prev_w);
+    bool h_changed = (win_h != s_prev_h);
+
+    int new_w, new_h;
+    if (w_changed && !h_changed) {
+        /* Horizontal edge drag — compute height from width */
+        new_w = win_w;
+        new_h = (int)((float)win_w * NATIVE_H / NATIVE_W + 0.5f);
+    } else if (h_changed && !w_changed) {
+        /* Vertical edge drag — compute width from height */
+        new_h = win_h;
+        new_w = (int)((float)win_h * NATIVE_W / NATIVE_H + 0.5f);
+    } else {
+        /* Corner drag or programmatic — keep the larger proportional axis */
+        float scale_x = (float)win_w / NATIVE_W;
+        float scale_y = (float)win_h / NATIVE_H;
+        if (scale_x >= scale_y) {
+            new_w = win_w;
+            new_h = (int)((float)win_w * NATIVE_H / NATIVE_W + 0.5f);
+        } else {
+            new_h = win_h;
+            new_w = (int)((float)win_h * NATIVE_W / NATIVE_H + 0.5f);
+        }
+    }
+
+    /* Enforce minimum size */
+    if (new_w < NATIVE_W) { new_w = NATIVE_W; new_h = NATIVE_H; }
+    if (new_h < NATIVE_H) { new_w = NATIVE_W; new_h = NATIVE_H; }
+
+    s_prev_w = new_w;
+    s_prev_h = new_h;
+
+    if (new_w != win_w || new_h != win_h) {
+        SDL_SetWindowSize(s_window, new_w, new_h);
+    }
+
+    s_enforcing = false;
 }
 
 /* ---- Always-on-top ---- */
@@ -252,6 +296,7 @@ void sim_display_show_window(void)
     if (!s_window) return;
     SDL_ShowWindow(s_window);
     SDL_RaiseWindow(s_window);
+    SDL_GetWindowSize(s_window, &s_prev_w, &s_prev_h);
     s_hidden = false;
 }
 

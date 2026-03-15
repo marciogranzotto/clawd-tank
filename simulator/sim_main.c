@@ -338,6 +338,10 @@ static void handle_sdl_events(void)
 {
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
+        if (e.type == SDL_WINDOWEVENT &&
+            e.window.event == SDL_WINDOWEVENT_RESIZED) {
+            sim_display_enforce_aspect_ratio();
+        }
         if (e.type == SDL_QUIT) {
             if (opt_listen_port > 0) {
                 sim_display_hide_window();
