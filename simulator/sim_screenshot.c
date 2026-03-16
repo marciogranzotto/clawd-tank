@@ -12,6 +12,9 @@ void sim_screenshot_init(const char *output_dir)
 {
     if (!output_dir) return;
     snprintf(s_output_dir, sizeof(s_output_dir), "%s", output_dir);
+    /* Strip trailing slashes to avoid double-slash in output paths */
+    size_t len = strlen(s_output_dir);
+    while (len > 1 && s_output_dir[len - 1] == '/') s_output_dir[--len] = '\0';
 
     /* Create directory if it doesn't exist */
     mkdir(s_output_dir, 0755);

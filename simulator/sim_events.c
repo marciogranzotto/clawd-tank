@@ -23,6 +23,7 @@ static sim_event_t s_events[MAX_EVENTS];
 static int s_event_count = 0;
 static int s_event_cursor = 0;  /* next event to process */
 static char s_last_suffix[32] = "";
+static uint32_t s_timeline_end = 0;  /* final time including trailing waits */
 
 /* Track injected notification IDs for dismiss-by-index */
 static char s_notif_ids[MAX_NOTIF_IDS][NOTIF_MAX_ID_LEN];
@@ -171,42 +172,71 @@ void sim_events_init_inline(const char *events_str)
         }
         else if (strncmp(p, "sessions", 8) == 0 && (!p[8] || p[8] == ';' || isspace((unsigned char)p[8]))) {
             p += 8;
-            /* Parse: sessions "anim_name" display_id [subagent_count]
-             * Creates a BLE_EVT_SET_SESSIONS with session_anim_count=1 */
-            char anim_str[32];
-            p = parse_quoted(p, anim_str, sizeof(anim_str));
-            p = skip_ws(p);
-            int display_id = atoi(p);
-            while (*p && *p != ';' && !isspace((unsigned char)*p)) p++;
-            /* Optional subagent count */
-            p = skip_ws(p);
-            int subagents = 0;
-            if (*p && *p != ';' && isdigit((unsigned char)*p)) {
-                subagents = atoi(p);
+            /* Parse: sessions anim1 id1 [anim2 id2 ...] [subagents N] [overflow N]
+             * Supports 1-4 anim/id pairs for multi-session display. */
+            ble_evt_t evt = { .type = BLE_EVT_SET_SESSIONS };
+            evt.session_anim_count = 0;
+            evt.subagent_count = 0;
+            evt.session_overflow = 0;
+            char suffix[64] = "";
+
+            while (evt.session_anim_count < MAX_VISIBLE_SESSIONS) {
+                p = skip_ws(p);
+                if (!*p || *p == ';') break;
+
+                /* Check for keyword args: subagents N, overflow N */
+                if (strncmp(p, "subagents", 9) == 0 && isspace((unsigned char)p[9])) {
+                    p += 9; p = skip_ws(p);
+                    evt.subagent_count = (uint8_t)atoi(p);
+                    while (*p && *p != ';' && !isspace((unsigned char)*p)) p++;
+                    continue;
+                }
+                if (strncmp(p, "overflow", 8) == 0 && isspace((unsigned char)p[8])) {
+                    p += 8; p = skip_ws(p);
+                    evt.session_overflow = (uint8_t)atoi(p);
+                    while (*p && *p != ';' && !isspace((unsigned char)*p)) p++;
+                    continue;
+                }
+
+                /* Parse anim_name id pair */
+                char anim_str[32];
+                p = parse_quoted(p, anim_str, sizeof(anim_str));
+                if (!anim_str[0]) break;
+
+                p = skip_ws(p);
+                if (!*p || *p == ';' || !isdigit((unsigned char)*p)) {
+                    fprintf(stderr, "[sim] sessions: expected id after '%s'\n", anim_str);
+                    break;
+                }
+                int display_id = atoi(p);
                 while (*p && *p != ';' && !isspace((unsigned char)*p)) p++;
+
+                int anim = -1;
+                if (strcmp(anim_str, "idle") == 0) anim = CLAWD_ANIM_IDLE;
+                else if (strcmp(anim_str, "typing") == 0) anim = CLAWD_ANIM_TYPING;
+                else if (strcmp(anim_str, "thinking") == 0) anim = CLAWD_ANIM_THINKING;
+                else if (strcmp(anim_str, "building") == 0) anim = CLAWD_ANIM_BUILDING;
+                else if (strcmp(anim_str, "confused") == 0) anim = CLAWD_ANIM_CONFUSED;
+                else if (strcmp(anim_str, "sleeping") == 0) anim = CLAWD_ANIM_SLEEPING;
+                else if (strcmp(anim_str, "juggling") == 0) anim = CLAWD_ANIM_JUGGLING;
+                else if (strcmp(anim_str, "sweeping") == 0) anim = CLAWD_ANIM_SWEEPING;
+
+                if (anim < 0) {
+                    fprintf(stderr, "[sim] Unknown session anim: %s\n", anim_str);
+                    continue;
+                }
+
+                int idx = evt.session_anim_count;
+                evt.session_anims[idx] = (uint8_t)anim;
+                evt.session_ids[idx] = (uint16_t)display_id;
+                evt.session_anim_count++;
+
+                /* Build suffix from first anim name */
+                if (idx == 0) snprintf(suffix, sizeof(suffix), "%s", anim_str);
             }
 
-            /* Map animation name to enum */
-            int anim = -1;
-            if (strcmp(anim_str, "idle") == 0) anim = CLAWD_ANIM_IDLE;
-            else if (strcmp(anim_str, "typing") == 0) anim = CLAWD_ANIM_TYPING;
-            else if (strcmp(anim_str, "thinking") == 0) anim = CLAWD_ANIM_THINKING;
-            else if (strcmp(anim_str, "building") == 0) anim = CLAWD_ANIM_BUILDING;
-            else if (strcmp(anim_str, "confused") == 0) anim = CLAWD_ANIM_CONFUSED;
-            else if (strcmp(anim_str, "sleeping") == 0) anim = CLAWD_ANIM_SLEEPING;
-            else if (strcmp(anim_str, "juggling") == 0) anim = CLAWD_ANIM_JUGGLING;
-            else if (strcmp(anim_str, "sweeping") == 0) anim = CLAWD_ANIM_SWEEPING;
-
-            if (anim >= 0) {
-                ble_evt_t evt = { .type = BLE_EVT_SET_SESSIONS };
-                evt.session_anim_count = 1;
-                evt.session_anims[0] = (uint8_t)anim;
-                evt.session_ids[0] = (uint16_t)display_id;
-                evt.subagent_count = (uint8_t)subagents;
-                evt.session_overflow = 0;
-                add_event(current_time, &evt, anim_str);
-            } else {
-                fprintf(stderr, "[sim] Unknown session anim: %s\n", anim_str);
+            if (evt.session_anim_count > 0) {
+                add_event(current_time, &evt, suffix);
             }
         }
         else if (strncmp(p, "wait", 4) == 0) {
@@ -225,6 +255,7 @@ void sim_events_init_inline(const char *events_str)
         p = skip_ws(p);
         if (*p == ';') p++;
     }
+    s_timeline_end = current_time;
 }
 
 void sim_events_init_scenario(const char *path)
@@ -309,6 +340,9 @@ void sim_events_init_scenario(const char *path)
     }
 
     cJSON_Delete(root);
+    /* Set timeline end from the last event's timestamp */
+    if (s_event_count > 0 && s_events[s_event_count - 1].time_ms > s_timeline_end)
+        s_timeline_end = s_events[s_event_count - 1].time_ms;
     printf("[sim] Loaded %d events from %s\n", s_event_count, path);
 }
 
@@ -339,8 +373,8 @@ bool sim_events_all_done(void)
 
 uint32_t sim_events_get_end_time(void)
 {
-    if (s_event_count == 0) return 0;
-    return s_events[s_event_count - 1].time_ms;
+    uint32_t last_evt = (s_event_count > 0) ? s_events[s_event_count - 1].time_ms : 0;
+    return (s_timeline_end > last_evt) ? s_timeline_end : last_evt;
 }
 
 const char *sim_events_last_suffix(void)
