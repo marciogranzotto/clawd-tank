@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 15 15" width="500" height="500">
+  <defs>
+    <style>
+      .hover-bob {
+        animation: bob 2s infinite ease-in-out;
+      }
+      .arm-l {
+        transform-origin: 4px 6.5px;
+        animation: wave-l 1s infinite alternate ease-in-out;
+      }
+      .arm-r {
+        transform-origin: 11px 6.5px;
+        animation: wave-r 1s infinite alternate ease-in-out;
+      }
+      .leg-ol {
+        transform-origin: 5.5px 9px;
+        animation: kick-ol 0.8s infinite alternate ease-in-out;
+      }
+      .leg-il {
+        transform-origin: 6.5px 9px;
+        animation: kick-il 1s infinite alternate ease-in-out;
+      }
+      .leg-ir {
+        transform-origin: 8.5px 9px;
+        animation: kick-ir 0.8s infinite alternate ease-in-out;
+      }
+      .leg-or {
+        transform-origin: 9.5px 9px;
+        animation: kick-or 1s infinite alternate ease-in-out;
+      }
+      .eyes {
+        animation: look 4s infinite;
+      }
+
+      @keyframes bob {
+        0% { transform: translateY(0); }
+        50% { transform: translateY(-1px); }
+        100% { transform: translateY(0); }
+      }
+      @keyframes wave-l {
+        0% { transform: rotate(-10deg); }
+        100% { transform: rotate(20deg); }
+      }
+      @keyframes wave-r {
+        0% { transform: rotate(10deg); }
+        100% { transform: rotate(-20deg); }
+      }
+      @keyframes kick-ol {
+        0% { transform: rotate(10deg); }
+        100% { transform: rotate(-15deg); }
+      }
+      @keyframes kick-il {
+        0% { transform: rotate(-10deg); }
+        100% { transform: rotate(15deg); }
+      }
+      @keyframes kick-ir {
+        0% { transform: rotate(15deg); }
+        100% { transform: rotate(-10deg); }
+      }
+      @keyframes kick-or {
+        0% { transform: rotate(-15deg); }
+        100% { transform: rotate(10deg); }
+      }
+      @keyframes look {
+        0% { transform: translate(0, 0); }
+        15% { transform: translate(0, 0); }
+        16% { transform: translate(-1px, 0); }
+        35% { transform: translate(-1px, 0); }
+        36% { transform: translate(1px, 0); }
+        55% { transform: translate(1px, 0); }
+        56% { transform: translate(0, -1px); }
+        75% { transform: translate(0, -1px); }
+        76% { transform: translate(0, 0); }
+        100% { transform: translate(0, 0); }
+      }
+    </style>
+  </defs>
+
+  <g id="master-group" class="hover-bob">
+    <g id="body-color-group" fill="#DE886D">
+      <rect id="torso" x="4" y="4" width="7" height="5"/>
+      <g class="arm-l"><rect id="left-arm" x="3" y="6" width="1" height="1"/></g>
+      <g class="arm-r"><rect id="right-arm" x="11" y="6" width="1" height="1"/></g>
+      
+      <g class="leg-ol"><rect id="outer-left-leg" x="5" y="9" width="1" height="1"/></g>
+      <g class="leg-il"><rect id="inner-left-leg" x="6" y="9" width="1" height="1"/></g>
+      <g class="leg-ir"><rect id="inner-right-leg" x="8" y="9" width="1" height="1"/></g>
+      <g class="leg-or"><rect id="outer-right-leg" x="9" y="9" width="1" height="1"/></g>
+    </g>
+    
+    <g id="eyes-color-group" fill="#000000">
+      <g class="eyes">
+        <rect id="left-eye" x="5" y="5" width="2" height="2"/>
+        <rect id="right-eye" x="8" y="5" width="2" height="2"/>
+      </g>
+    </g>
+  </g>
+</svg>
