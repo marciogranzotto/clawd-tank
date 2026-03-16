@@ -41,6 +41,7 @@
 - **HUD canvas cleanup** — HUD canvas properly cleared when hiding subagent counter.
 - **BLE version reading** — `read_version` return type validated for mock compatibility in tests.
 - **Bounds check for empty sessions** — `set_sessions` with empty session list handled safely.
+- **BLE reconnection state sync** — Daemon now proactively reconnects when the BLE device drops and immediately syncs time, re-reads protocol version, and replays all active notifications and session state. Previously this only happened when a new hook call arrived.
 
 ## [1.2.1] - 2026-03-14
 

@@ -372,6 +372,20 @@ class ClawdDaemon:
         await transport.write_notification(payload)
         logger.info("Synced time: epoch %d, tz %s", epoch, tz)
 
+    async def _post_connect_sync(self, transport, name: str) -> None:
+        """Run time sync, version read, and replay after a (re)connection."""
+        await self._sync_time_for(transport)
+        if hasattr(transport, 'read_version') and callable(getattr(transport, 'read_version', None)):
+            try:
+                version = await transport.read_version()
+                if isinstance(version, int) and version >= 1:
+                    self._transport_versions[name] = version
+                    logger.info("Transport '%s': protocol version %d", name, version)
+            except Exception:
+                self._transport_versions[name] = 1
+                logger.warning("Transport '%s': version read failed, defaulting to v1", name)
+        await self._replay_active_for(transport, name)
+
     async def _replay_active_for(self, transport, name: str = "") -> None:
         """Replay all active notifications to a transport after reconnect."""
         logger.info("Replaying %d active notifications", len(self._active_notifications))
@@ -402,22 +416,16 @@ class ClawdDaemon:
         # Initial connection — retries until connected
         await transport.ensure_connected()
         if transport.is_connected:
-            await self._sync_time_for(transport)
-            # Read protocol version for BLE transports
-            if hasattr(transport, 'read_version') and callable(getattr(transport, 'read_version', None)):
-                try:
-                    version = await transport.read_version()
-                    if isinstance(version, int) and version >= 1:
-                        self._transport_versions[name] = version
-                        logger.info("Transport '%s': protocol version %d", name, version)
-                except Exception:
-                    self._transport_versions[name] = 1
-                    logger.warning("Transport '%s': version read failed, defaulting to v1", name)
-            await self._replay_active_for(transport, name)
+            await self._post_connect_sync(transport, name)
         while self._running:
             try:
                 msg = await asyncio.wait_for(queue.get(), timeout=1.0)
             except asyncio.TimeoutError:
+                # Proactively reconnect if transport dropped
+                if not transport.is_connected:
+                    await transport.ensure_connected()
+                    if transport.is_connected:
+                        await self._post_connect_sync(transport, name)
                 continue
             try:
                 payload = daemon_message_to_ble_payload(msg)
@@ -430,7 +438,7 @@ class ClawdDaemon:
             was_connected = transport.is_connected
             await transport.ensure_connected()
             if not was_connected and transport.is_connected:
-                await self._sync_time_for(transport)
+                await self._post_connect_sync(transport, name)
 
             success = await transport.write_notification(payload)
 
@@ -438,8 +446,9 @@ class ClawdDaemon:
                 was_connected = transport.is_connected
                 await transport.ensure_connected()
                 if not was_connected and transport.is_connected:
-                    await self._sync_time_for(transport)
-                await self._replay_active_for(transport, name)
+                    await self._post_connect_sync(transport, name)
+                else:
+                    await self._replay_active_for(transport, name)
 
     def _write_pid(self) -> None:
         PID_PATH.parent.mkdir(parents=True, exist_ok=True)

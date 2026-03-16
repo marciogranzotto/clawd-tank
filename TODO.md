@@ -101,6 +101,7 @@ Firmware uses RGB565A8 pixel format + cropped sprites to fit multi-session in ~2
 - [x] **Daemon thread crash logging** — Daemon thread exceptions are caught and logged instead of dying silently. Periodic health check timer detects dead daemon and shows disconnected icon.
 - [x] **Orphaned sim process cleanup** — On startup, orphaned simulator processes on the listen port are identified by name and killed instead of being connected to.
 - [x] **Display state sync on replay** — `_last_display_state` is updated after transport replay to prevent duplicate broadcasts.
+- [x] **Proactive BLE reconnection** — Transport sender loop detects dropped connections on each 1s timeout and immediately reconnects with full state sync (time, protocol version, notifications, sessions) instead of waiting for the next hook message.
 
 ## Sprite Auto-Crop & Firmware Memory Optimization (v1.3.0) — Complete
 
