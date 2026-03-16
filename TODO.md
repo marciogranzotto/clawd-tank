@@ -20,6 +20,7 @@ Session state persisted to disk — restarting the app preserves display state.
 Build script (`host/build.sh`) automates simulator + py2app + bundle.
 Auto-update hooks, daemon health monitoring, orphan sim cleanup, launchd auto-migration.
 Firmware uses RGB565A8 pixel format + cropped sprites to fit multi-session in ~200 KB SRAM (no PSRAM).
+Custom app icon. Proactive BLE reconnection with full state sync on disconnect.
 
 ---
 
@@ -102,6 +103,18 @@ Firmware uses RGB565A8 pixel format + cropped sprites to fit multi-session in ~2
 - [x] **Orphaned sim process cleanup** — On startup, orphaned simulator processes on the listen port are identified by name and killed instead of being connected to.
 - [x] **Display state sync on replay** — `_last_display_state` is updated after transport replay to prevent duplicate broadcasts.
 - [x] **Proactive BLE reconnection** — Transport sender loop detects dropped connections on each 1s timeout and immediately reconnects with full state sync (time, protocol version, notifications, sessions) instead of waiting for the next hook message.
+
+## Multi-Session Display (v1.3.0) — Complete
+
+- [x] **Multi-session display** — Up to 4 concurrent Clawd sprites with per-session animations. Protocol v2 `set_sessions` action with stable UUIDs. Overflow badge shows "+N" beyond `MAX_VISIBLE=4`.
+- [x] **Walk-in animation** — New sessions enter from offscreen with a walking sprite. Existing sessions reposition with walk animations on layout change.
+- [x] **Going-away burrowing animation** — Exiting sessions play a burrowing animation. Remaining sessions defer repositioning until burrowing completes.
+- [x] **HUD subagent counter** — 2x-scaled mini-crab icon with pixel-art bitmap font shows active subagent count. Overflow badge anchored to right edge.
+- [x] **Per-session sweeping** — `PreCompact` sends sweep animation only to the compacting session (v2), global sweep preserved for v1 fallback.
+- [x] **Protocol version negotiation** — BLE GATT characteristic exposes protocol version (v2). Daemon reads on connect, selects v1 `set_status` or v2 `set_sessions` per-transport.
+- [x] **`query_state` TCP action** — Debug introspection returning JSON with slot states, animations, and positions.
+- [x] **Simulator window improvements** — Continuous float scaling, aspect ratio enforcement (328:180), uniform LED border rendering, borderless/resizable window with integer pixel scaling.
+- [x] **Custom app icon** — macOS app icon with Clawd pixel-art crab design. SVG source and full iconset in `assets/`.
 
 ## Sprite Auto-Crop & Firmware Memory Optimization (v1.3.0) — Complete
 
