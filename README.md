@@ -7,7 +7,7 @@ Clawd Tank is a notification display for Claude Code built on a [Waveshare ESP32
 **No hardware? No problem.** The simulator runs natively on macOS and ships bundled inside the Menu Bar app. Download it from [Releases](https://github.com/marciogranzotto/clawd-tank/releases) — no build tools needed.
 
 <p align="center">
-  <img src="assets/sim-recordings/clawd-idle.gif" alt="Clawd idle" width="480">
+  <img src="assets/sim-recordings/clawd-multi-session.gif" alt="Multi-session display" width="480">
   <img src="assets/sim-recordings/clawd-notification.gif" alt="Clawd notification" width="480">
 </p>
 
@@ -36,7 +36,7 @@ Claude Code hooks --> clawd-tank-notify --> daemon --> BLE --> ESP32-C6 display
 
 - **Board**: [Waveshare ESP32-C6-LCD-1.47](https://s.click.aliexpress.com/e/_c4PGS55v)
 - **Display**: 1.47" 320x172 ST7789V (SPI), 16-bit RGB565
-- **SoC**: ESP32-C6FH8 (RISC-V, single core), 8MB flash, 4MB PSRAM (octal)
+- **SoC**: ESP32-C6FH8 (RISC-V, single core), 8MB flash, 512KB SRAM (no PSRAM)
 - **RGB LED**: Onboard WS2812B on GPIO8 — flashes on incoming notifications
 - **Connectivity**: BLE 5.0 (NimBLE, peripheral role)
 
@@ -137,8 +137,8 @@ The daemon auto-starts on the first hook event. Logs at `~/.clawd-tank/daemon.lo
 
 ## Features
 
+- **Multi-session display** — up to 4 concurrent Claude Code sessions shown as individual animated Clawd sprites, each with their own working animation. New sessions walk in, exiting sessions burrow away
 - **Working animations** — real-time session-aware animations driven by Claude Code hooks (thinking, typing, juggling, building, confused, sweeping)
-- **Workload meter** — animation intensity scales with concurrent sessions: 1 = typing, 2 = juggling, 3+ = building
 - **Session tracking** — daemon tracks per-session state with priority-based display resolution, staleness eviction, and subagent lifecycle tracking
 - **Session persistence** — session state survives daemon restarts, so relaunching the app immediately shows the correct animation for running sessions
 - **Time display** — synced from host over BLE on connect (no WiFi/NTP needed)
@@ -156,14 +156,15 @@ The daemon auto-starts on the first hook event. Logs at `~/.clawd-tank/daemon.lo
 
 ### Working Animations
 
-Clawd's animation reflects what Claude is doing across all active sessions:
+Clawd's animation reflects what Claude is doing across all active sessions. With multiple sessions, each gets its own Clawd sprite:
 
 | State | When | |
 |-------|------|---|
+| **Multi-session** | 2+ concurrent sessions, each with individual animations | ![Multi-session](assets/sim-recordings/clawd-multi-session.gif) |
 | **Thinking** | User submitted a prompt, Claude is reasoning | ![Thinking](assets/sim-recordings/clawd-thinking.gif) |
 | **Typing** | 1 session using tools | ![Typing](assets/sim-recordings/clawd-typing.gif) |
-| **Juggling** | 2 sessions using tools simultaneously | ![Juggling](assets/sim-recordings/clawd-juggling.gif) |
-| **Building** | 3+ sessions using tools simultaneously | ![Building](assets/sim-recordings/clawd-building.gif) |
+| **Juggling** | 2 sessions using tools simultaneously (v1) | ![Juggling](assets/sim-recordings/clawd-juggling.gif) |
+| **Building** | 3+ sessions using tools simultaneously (v1) | ![Building](assets/sim-recordings/clawd-building.gif) |
 | **Confused** | Claude has been waiting 60s+ for user input | ![Confused](assets/sim-recordings/clawd-confused.gif) |
 | **Sweeping** | Context compaction (PreCompact) — oneshot | ![Sweeping](assets/sim-recordings/clawd-sweeping.gif) |
 
