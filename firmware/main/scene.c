@@ -200,6 +200,7 @@ typedef struct {
     uint16_t display_id;   /* stable ID from daemon, for diffing */
     int x_off;             /* last alignment x offset (for re-align after oneshot) */
     bool active;
+    bool walking_in;       /* true while walk-in slide animation is running */
 } clawd_slot_t;
 
 /* ---------- Star config ---------- */
@@ -316,6 +317,7 @@ static void walk_in_complete_cb(lv_anim_t *a) {
     if (!s) return;
     for (int i = 0; i < MAX_SLOTS; i++) {
         if (s->slots[i].sprite_img == sprite && s->slots[i].active) {
+            s->slots[i].walking_in = false;
             clawd_anim_id_t target = s->slots[i].fallback_anim;
             if (s->slots[i].cur_anim == CLAWD_ANIM_WALKING && target != CLAWD_ANIM_WALKING) {
                 s->slots[i].cur_anim = target;
@@ -357,6 +359,7 @@ static void scene_activate_slot(scene_t *s, int idx, clawd_anim_id_t anim)
     slot->frame_idx = 0;
     slot->last_frame_tick = lv_tick_get();
     slot->x_off = 0;
+    slot->walking_in = false;
     decode_and_apply_frame(slot);
     const anim_def_t *def = &anim_defs[anim];
     lv_obj_set_size(slot->sprite_img, def->width, def->height);
@@ -796,23 +799,30 @@ void scene_set_sessions(scene_t *s, const uint8_t *anims, const uint16_t *ids,
             old_slots[old_i].sprite_img = NULL; /* transferred ownership */
             old_slots[old_i].frame_buf = NULL;
             s->slots[new_i].display_id = ids[new_i];
-
-            /* Update animation if it changed */
-            clawd_anim_id_t new_anim = (clawd_anim_id_t)anims[new_i];
-            if (s->slots[new_i].cur_anim != new_anim) {
-                s->slots[new_i].cur_anim = new_anim;
-                s->slots[new_i].fallback_anim = new_anim;
-                s->slots[new_i].frame_idx = 0;
-                s->slots[new_i].last_frame_tick = lv_tick_get();
-                decode_and_apply_frame(&s->slots[new_i]);
-            }
-
-            /* Reposition */
             s->slots[new_i].x_off = x_off;
-            const anim_def_t *def = &anim_defs[s->slots[new_i].cur_anim];
-            lv_obj_set_size(s->slots[new_i].sprite_img, def->width, def->height);
-            lv_obj_align(s->slots[new_i].sprite_img, LV_ALIGN_BOTTOM_MID,
-                         x_off, def->y_offset);
+
+            clawd_anim_id_t new_anim = (clawd_anim_id_t)anims[new_i];
+
+            if (s->slots[new_i].walking_in) {
+                /* Walk-in animation still running — don't interrupt it.
+                 * Just update fallback so it switches to the right anim on arrival. */
+                s->slots[new_i].fallback_anim = new_anim;
+            } else {
+                /* Update animation if it changed */
+                if (s->slots[new_i].cur_anim != new_anim) {
+                    s->slots[new_i].cur_anim = new_anim;
+                    s->slots[new_i].fallback_anim = new_anim;
+                    s->slots[new_i].frame_idx = 0;
+                    s->slots[new_i].last_frame_tick = lv_tick_get();
+                    decode_and_apply_frame(&s->slots[new_i]);
+                }
+
+                /* Reposition */
+                const anim_def_t *def = &anim_defs[s->slots[new_i].cur_anim];
+                lv_obj_set_size(s->slots[new_i].sprite_img, def->width, def->height);
+                lv_obj_align(s->slots[new_i].sprite_img, LV_ALIGN_BOTTOM_MID,
+                             x_off, def->y_offset);
+            }
         } else {
             /* New session — walk in from off-screen right.
              * Activate with walking animation, position off-screen,
@@ -836,6 +846,7 @@ void scene_set_sessions(scene_t *s, const uint8_t *anims, const uint16_t *ids,
             int target_x = container_w / 2 + x_off - walk_def->width / 2;
 
             /* Slide in with walk_in_complete_cb to switch to session anim */
+            s->slots[new_i].walking_in = true;
             lv_anim_t walk_a;
             lv_anim_init(&walk_a);
             lv_anim_set_var(&walk_a, s->slots[new_i].sprite_img);
