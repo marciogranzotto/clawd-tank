@@ -9,6 +9,7 @@
 #include "ble_service.h"
 #include "ui_manager.h"
 #include "config_store.h"
+#include "esp_heap_caps.h"
 
 static const char *TAG = "clawd-tank";
 
@@ -62,5 +63,8 @@ void app_main(void) {
         abort();
     }
 
-    ESP_LOGI(TAG, "Clawd Tank running");
+    ESP_LOGI(TAG, "Clawd Tank running — free heap: %lu bytes (internal: %lu, PSRAM: %lu)",
+             (unsigned long)esp_get_free_heap_size(),
+             (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 }

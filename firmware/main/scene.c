@@ -3,6 +3,10 @@
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
+#ifndef SIMULATOR
+#include "esp_log.h"
+#include "esp_heap_caps.h"
+#endif
 
 /* ---------- Sprite data includes ---------- */
 
@@ -74,7 +78,7 @@ static const anim_def_t anim_defs[] = {
         .looping = true,
         .width = IDLE_WIDTH,
         .height = IDLE_HEIGHT,
-        .y_offset = 8,
+        .y_offset = -8,   /* 8 - 16 (bottom rows cropped) */
     },
     [CLAWD_ANIM_ALERT] = {
         .rle_data = alert_rle_data,
@@ -84,7 +88,7 @@ static const anim_def_t anim_defs[] = {
         .looping = false,
         .width = ALERT_WIDTH,
         .height = ALERT_HEIGHT,
-        .y_offset = 8,
+        .y_offset = -4,   /* 8 - 12 */
     },
     [CLAWD_ANIM_HAPPY] = {
         .rle_data = happy_rle_data,
@@ -94,7 +98,7 @@ static const anim_def_t anim_defs[] = {
         .looping = false,
         .width = HAPPY_WIDTH,
         .height = HAPPY_HEIGHT,
-        .y_offset = 28,
+        .y_offset = -7,   /* 28 - 35 */
     },
     [CLAWD_ANIM_SLEEPING] = {
         .rle_data = sleeping_rle_data,
@@ -104,7 +108,7 @@ static const anim_def_t anim_defs[] = {
         .looping = true,
         .width = SLEEPING_WIDTH,
         .height = SLEEPING_HEIGHT,
-        .y_offset = 8,
+        .y_offset = -8,   /* 8 - 16 */
     },
     [CLAWD_ANIM_DISCONNECTED] = {
         .rle_data = disconnected_rle_data,
@@ -114,7 +118,7 @@ static const anim_def_t anim_defs[] = {
         .looping = true,
         .width = DISCONNECTED_WIDTH,
         .height = DISCONNECTED_HEIGHT,
-        .y_offset = 8,
+        .y_offset = -6,   /* 8 - 14 */
     },
     [CLAWD_ANIM_THINKING] = {
         .rle_data = thinking_rle_data,
@@ -124,7 +128,7 @@ static const anim_def_t anim_defs[] = {
         .looping = true,
         .width = THINKING_WIDTH,
         .height = THINKING_HEIGHT,
-        .y_offset = 8,
+        .y_offset = -8,   /* 8 - 16 */
     },
     [CLAWD_ANIM_TYPING] = {
         .rle_data = typing_rle_data,
@@ -134,7 +138,7 @@ static const anim_def_t anim_defs[] = {
         .looping = true,
         .width = TYPING_WIDTH,
         .height = TYPING_HEIGHT,
-        .y_offset = 8,
+        .y_offset = -8,   /* 8 - 16 */
     },
     [CLAWD_ANIM_JUGGLING] = {
         .rle_data = juggling_rle_data,
@@ -144,7 +148,7 @@ static const anim_def_t anim_defs[] = {
         .looping = true,
         .width = JUGGLING_WIDTH,
         .height = JUGGLING_HEIGHT,
-        .y_offset = 8,
+        .y_offset = -8,   /* 8 - 16 */
     },
     [CLAWD_ANIM_BUILDING] = {
         .rle_data = building_rle_data,
@@ -154,7 +158,7 @@ static const anim_def_t anim_defs[] = {
         .looping = true,
         .width = BUILDING_WIDTH,
         .height = BUILDING_HEIGHT,
-        .y_offset = 8,
+        .y_offset = -4,   /* 8 - 12 */
     },
     [CLAWD_ANIM_CONFUSED] = {
         .rle_data = confused_rle_data,
@@ -164,7 +168,7 @@ static const anim_def_t anim_defs[] = {
         .looping = true,
         .width = CONFUSED_WIDTH,
         .height = CONFUSED_HEIGHT,
-        .y_offset = 8,
+        .y_offset = -4,   /* 8 - 12 */
     },
     [CLAWD_ANIM_SWEEPING] = {
         .rle_data = sweeping_rle_data,
@@ -174,7 +178,7 @@ static const anim_def_t anim_defs[] = {
         .looping = false,
         .width = SWEEPING_WIDTH,
         .height = SWEEPING_HEIGHT,
-        .y_offset = 8,
+        .y_offset = 0,    /* 8 - 8 */
     },
     [CLAWD_ANIM_WALKING] = {
         .rle_data = walking_rle_data,
@@ -184,7 +188,7 @@ static const anim_def_t anim_defs[] = {
         .looping = true,
         .width = WALKING_WIDTH,
         .height = WALKING_HEIGHT,
-        .y_offset = 8,
+        .y_offset = -8,   /* 8 - 16 */
     },
     [CLAWD_ANIM_GOING_AWAY] = {
         .rle_data = going_away_rle_data,
@@ -194,7 +198,7 @@ static const anim_def_t anim_defs[] = {
         .looping = false,  /* oneshot — plays once then done */
         .width = GOING_AWAY_WIDTH,
         .height = GOING_AWAY_HEIGHT,
-        .y_offset = 8,
+        .y_offset = -6,   /* 8 - 14 */
     },
     [CLAWD_ANIM_MINI_CLAWD] = {
         .rle_data = mini_crab_rle_data,
@@ -204,14 +208,21 @@ static const anim_def_t anim_defs[] = {
         .looping = true,
         .width = MINI_CRAB_WIDTH,
         .height = MINI_CRAB_HEIGHT,
-        .y_offset = 0,
+        .y_offset = -5,   /* 0 - 5 */
     },
 };
 
 /* ---------- Multi-slot support ---------- */
 
 #define MAX_VISIBLE 4   /* max active sessions on screen (matches daemon protocol) */
-#define MAX_SLOTS  8    /* slot array size: active + departing (going-away animation) */
+#ifdef SIMULATOR
+#define MAX_SLOTS   8   /* slot array size: active + departing (going-away animation) */
+#else
+/* ESP32-C6 has no PSRAM. With cropped sprites + RGB565A8, the largest
+ * session buffer is ~50 KB (confused). 4 visible + 2 departing fits
+ * comfortably in ~200 KB free internal SRAM. */
+#define MAX_SLOTS   6
+#endif
 
 typedef struct {
     lv_obj_t *sprite_img;
@@ -283,11 +294,20 @@ struct scene_t {
 
 static void ensure_frame_buf(clawd_slot_t *slot, int w, int h)
 {
-    int needed = w * h * 4; /* ARGB8888 */
+#ifdef SIMULATOR
+    int needed = w * h * 4; /* ARGB8888 — simulator has plenty of memory */
+#else
+    int needed = w * h * 3; /* RGB565A8 — saves 25% on memory-constrained ESP32-C6 */
+#endif
     if (slot->frame_buf && slot->frame_buf_size >= needed) return;
     free(slot->frame_buf);
     slot->frame_buf = malloc(needed);
     slot->frame_buf_size = slot->frame_buf ? needed : 0;
+#ifndef SIMULATOR
+    if (!slot->frame_buf) {
+        ESP_LOGW("scene", "Frame buffer alloc failed (%d bytes)", needed);
+    }
+#endif
 }
 
 static void decode_and_apply_frame(clawd_slot_t *slot)
@@ -301,18 +321,30 @@ static void decode_and_apply_frame(clawd_slot_t *slot)
     ensure_frame_buf(slot, w, h);
     if (!slot->frame_buf) return;
 
-    /* Decompress this frame's RLE directly to ARGB8888 */
     const uint16_t *frame_rle = &def->rle_data[def->frame_offsets[idx]];
+#ifdef SIMULATOR
+    /* Simulator: decode to ARGB8888 (4 bytes/pixel) */
     rle_decode_argb8888(frame_rle, slot->frame_buf, w * h, TRANSPARENT_KEY);
+#else
+    /* Firmware: decode to RGB565A8 (3 bytes/pixel) — saves 25% memory */
+    rle_decode_rgb565a8(frame_rle, slot->frame_buf, w * h, TRANSPARENT_KEY);
+#endif
 
     /* Update the LVGL image descriptor */
     slot->frame_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
     slot->frame_dsc.header.w = w;
     slot->frame_dsc.header.h = h;
+#ifdef SIMULATOR
     slot->frame_dsc.header.cf = LV_COLOR_FORMAT_ARGB8888;
     slot->frame_dsc.header.stride = w * 4;
     slot->frame_dsc.data = slot->frame_buf;
     slot->frame_dsc.data_size = w * h * 4;
+#else
+    slot->frame_dsc.header.cf = LV_COLOR_FORMAT_RGB565A8;
+    slot->frame_dsc.header.stride = w * 2;
+    slot->frame_dsc.data = slot->frame_buf;
+    slot->frame_dsc.data_size = w * h * 3;
+#endif
 
     lv_image_set_src(slot->sprite_img, &slot->frame_dsc);
 }

@@ -73,3 +73,32 @@ static inline void rle_decode_argb8888(const uint16_t *rle, uint8_t *out,
         }
     }
 }
+
+/**
+ * Decode RLE data to RGB565A8 format (LVGL native-with-alpha for 16-bit displays).
+ *
+ * Output layout: RGB565 color array (pixel_count * 2 bytes) followed by
+ * alpha array (pixel_count * 1 byte). Total: pixel_count * 3 bytes.
+ * This uses 25% less memory than ARGB8888 with no visual loss on 16-bit displays.
+ *
+ * @param rle              Pointer to (value, count) pairs
+ * @param out              Output buffer (must hold pixel_count * 3 bytes)
+ * @param pixel_count      Number of pixels (width * height)
+ * @param transparent_key  RGB565 value treated as fully transparent
+ */
+static inline void rle_decode_rgb565a8(const uint16_t *rle, uint8_t *out,
+                                        int pixel_count, uint16_t transparent_key)
+{
+    uint16_t *rgb = (uint16_t *)out;
+    uint8_t  *alpha = out + pixel_count * 2;
+    int pos = 0;
+    while (pos < pixel_count) {
+        uint16_t value = *rle++;
+        uint16_t count = *rle++;
+        uint8_t a = (value == transparent_key) ? 0x00 : 0xFF;
+        for (uint16_t i = 0; i < count && pos < pixel_count; i++, pos++) {
+            rgb[pos] = value;
+            alpha[pos] = a;
+        }
+    }
+}

@@ -13,14 +13,21 @@
 - **`query_state` TCP action** — Debug introspection command returns JSON with all slot states, animations, and positions.
 - **`gemini_animate.py` tool** — AI-assisted SVG animation generation using Gemini API.
 - **New sprite assets** — Going-away burrowing sprite, walking sprite, mini-clawd HUD sprite, with SVG sources.
+- **Auto-crop sprite pipeline** — `tools/crop_sprites.py` crops all sprite headers in-place with symmetric horizontal padding (keeps Clawd centered) and free vertical cropping. Reduces frame buffer memory by 69% (1194 KB → 368 KB across all sprites). `tools/analyze_sprite_bounds.py` for bounding box analysis.
+- **RGB565A8 pixel format on firmware** — Frame buffers use 3 bytes/pixel (native-with-alpha for 16-bit display) instead of 4 bytes/pixel ARGB8888, saving 25% memory per buffer. New `rle_decode_rgb565a8` decoder in `rle_sprite.h`.
+- **Heap diagnostics** — Free heap breakdown (internal SRAM + PSRAM) logged at firmware boot.
+- **OOM logging** — Frame buffer allocation failures logged with `ESP_LOGW` instead of silent skip.
 
 ### Changed
 
-- **Scene slot architecture** — `MAX_VISIBLE=4` display slots with `MAX_SLOTS=8` total (extra slots accommodate departing animations at full capacity).
+- **Scene slot architecture** — `MAX_VISIBLE=4` on both platforms. `MAX_SLOTS=6` on firmware (no PSRAM), `MAX_SLOTS=8` on simulator.
+- **Sprite dimensions** — All sprites auto-cropped to tight bounding boxes. Largest session sprite is confused at 152x113 (was 180x180). Idle is 72x51, walking is 60x40. y_offsets adjusted to preserve on-screen positioning.
 - **`build.sh` always rebuilds** — No stale check; static simulator is always rebuilt to avoid version drift.
 
 ### Fixed
 
+- **Firmware build errors** — Fixed `pixel_font.c` missing from firmware CMakeLists (was in simulator only), format specifier mismatches (`%d` → `PRId32`), unused variable/function warnings, and `snprintf` truncation warning.
+- **Firmware memory constraints** — ESP32-C6 has no PSRAM (corrected from CLAUDE.md which incorrectly stated 4MB). Removed bogus PSRAM settings from `sdkconfig.defaults`. Sprite cropping + RGB565A8 format ensures multi-session display fits in ~200 KB free internal SRAM.
 - **Simulator window resizing** — Replaced integer-step scaling (which left large black dead zones between scale jumps) with continuous float scaling that fills the window smoothly at any size.
 - **Aspect ratio enforcement** — Window now locks to the native display aspect ratio (328:180) during resize, eliminating black letterbox bars. Drag direction is detected (horizontal, vertical, or corner) to adjust the correct axis.
 - **LED border rendering** — Border now renders uniformly around the content by filling the entire window with the LED color and insetting the framebuffer, instead of computing separate border and content rects with rounding gaps.
