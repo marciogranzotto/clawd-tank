@@ -200,14 +200,17 @@ class ClawdDaemon:
 
         anims = []
         ids = []
-        total_subagents = 0
+
+        # Count subagents across ALL sessions, not just visible ones
+        total_subagents = sum(
+            len(s.get("subagents", set())) for s in self._session_states.values()
+        )
 
         for session_id, display_id in self._session_order[:4]:
             state = self._session_states.get(session_id)
             if state is None:
                 continue
             session_subagents = state.get("subagents", set())
-            total_subagents += len(session_subagents)
 
             if state["state"] == "working" or session_subagents:
                 if session_subagents:

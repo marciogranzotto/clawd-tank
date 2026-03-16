@@ -170,6 +170,12 @@ static void handle_window_action(const char *buf, uint16_t len) {
 static void handle_client(int client_fd) {
     printf("[tcp] Client connected\n");
 
+    /* Prevent SIGPIPE crash on macOS when client disconnects during send() */
+#ifdef SO_NOSIGPIPE
+    int one = 1;
+    setsockopt(client_fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+#endif
+
     pthread_mutex_lock(&s_client_mutex);
     s_client_fd = client_fd;
     pthread_mutex_unlock(&s_client_mutex);
