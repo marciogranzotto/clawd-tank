@@ -888,6 +888,7 @@ static void scene_update_hud(scene_t *s, uint8_t subagent_count, uint8_t overflo
         pixel_font_draw(s->hud_canvas, buf, anim_defs[CLAWD_ANIM_MINI_CLAWD].width + 2, 1, 2, lv_color_hex(0xFFC107));
         lv_obj_clear_flag(s->hud_canvas, LV_OBJ_FLAG_HIDDEN);
     } else {
+        lv_canvas_fill_bg(s->hud_canvas, lv_color_hex(0x000000), LV_OPA_TRANSP);
         lv_obj_add_flag(s->hud_canvas, LV_OBJ_FLAG_HIDDEN);
     }
 
