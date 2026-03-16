@@ -22,6 +22,7 @@
 - **RGB565A8 pixel format on firmware** — Frame buffers use 3 bytes/pixel (native-with-alpha for 16-bit display) instead of 4 bytes/pixel ARGB8888, saving 25% memory per buffer. New `rle_decode_rgb565a8` decoder in `rle_sprite.h`.
 - **Heap diagnostics** — Free heap breakdown (internal SRAM + PSRAM) logged at firmware boot.
 - **OOM logging** — Frame buffer allocation failures logged with `ESP_LOGW` instead of silent skip.
+- **Custom app icon** — New macOS app icon with Clawd pixel-art crab design, replacing the default py2app icon. SVG source and full iconset included in `assets/`.
 
 ### Changed
 
