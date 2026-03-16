@@ -825,32 +825,28 @@ void scene_set_sessions(scene_t *s, const uint8_t *anims, const uint16_t *ids,
             }
         } else {
             /* New session — walk in from off-screen right.
-             * Activate with walking animation, position off-screen,
-             * slide to target, then switch to session animation. */
+             *
+             * LVGL 9 coordinate model: lv_obj_set_x/set_pos set OFFSETS
+             * from the alignment anchor (LV_ALIGN_BOTTOM_MID), not absolute
+             * pixel positions. So x=0 means "at center", x=250 means
+             * "250px right of center" (off-screen on a 320px display). */
             scene_activate_slot(s, new_i, CLAWD_ANIM_WALKING);
             s->slots[new_i].display_id = ids[new_i];
             s->slots[new_i].x_off = x_off;
             s->slots[new_i].fallback_anim = (clawd_anim_id_t)anims[new_i];
 
             const anim_def_t *walk_def = &anim_defs[CLAWD_ANIM_WALKING];
-            /* Start off-screen right: use absolute positioning */
-            lv_obj_set_size(s->slots[new_i].sprite_img, walk_def->width, walk_def->height);
-            lv_obj_set_pos(s->slots[new_i].sprite_img,
-                           340,  /* off-screen right */
-                           SCENE_HEIGHT - walk_def->height + walk_def->y_offset);
+            /* Start off-screen right: large positive X offset from BOTTOM_MID.
+             * Y stays as y_offset (already set by scene_activate_slot's align). */
+            int start_x_off = 250;  /* well past right edge from center */
+            lv_obj_set_x(s->slots[new_i].sprite_img, start_x_off);
 
-            /* Compute target X from alignment math:
-             * BOTTOM_MID with x_off means center = container_width/2 + x_off,
-             * then subtract half sprite width for the left edge. */
-            int container_w = lv_obj_get_width(s->container);
-            int target_x = container_w / 2 + x_off - walk_def->width / 2;
-
-            /* Slide in with walk_in_complete_cb to switch to session anim */
+            /* Target X is just the alignment offset for this slot position */
             s->slots[new_i].walking_in = true;
             lv_anim_t walk_a;
             lv_anim_init(&walk_a);
             lv_anim_set_var(&walk_a, s->slots[new_i].sprite_img);
-            lv_anim_set_values(&walk_a, 340, target_x);
+            lv_anim_set_values(&walk_a, start_x_off, x_off);
             lv_anim_set_duration(&walk_a, 800);
             lv_anim_set_path_cb(&walk_a, lv_anim_path_ease_out);
             lv_anim_set_exec_cb(&walk_a, (lv_anim_exec_xcb_t)lv_obj_set_x);
@@ -862,6 +858,9 @@ void scene_set_sessions(scene_t *s, const uint8_t *anims, const uint16_t *ids,
     /* Clean up removed slots — fade out and delete when done */
     for (int i = 0; i < MAX_SLOTS; i++) {
         if (old_slots[i].sprite_img) {
+            /* Cancel any walk-in animation before starting fade-out
+             * to avoid use-after-free if fade deletes sprite first */
+            lv_anim_delete(old_slots[i].sprite_img, (lv_anim_exec_xcb_t)lv_obj_set_x);
             /* This slot wasn't transferred — fade out over 400ms */
             lv_anim_t a;
             lv_anim_init(&a);
@@ -883,12 +882,17 @@ void scene_set_sessions(scene_t *s, const uint8_t *anims, const uint16_t *ids,
         s->slots[i].active = false;
     }
 
-    /* In narrow mode, hide all slots except 0 */
+    /* In narrow mode, hide all slots except 0 and re-center slot 0 */
     if (s->narrow) {
         for (int i = 1; i < count; i++) {
             if (s->slots[i].sprite_img) {
                 lv_obj_add_flag(s->slots[i].sprite_img, LV_OBJ_FLAG_HIDDEN);
             }
+        }
+        if (s->slots[0].active && s->slots[0].sprite_img) {
+            s->slots[0].x_off = 0;
+            const anim_def_t *def = &anim_defs[s->slots[0].cur_anim];
+            lv_obj_align(s->slots[0].sprite_img, LV_ALIGN_BOTTOM_MID, 0, def->y_offset);
         }
     }
 
