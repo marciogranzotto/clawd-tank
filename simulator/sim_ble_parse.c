@@ -14,6 +14,7 @@ static int parse_anim_name(const char *str) {
     if (strcmp(str, "thinking") == 0) return CLAWD_ANIM_THINKING;
     if (strcmp(str, "building") == 0) return CLAWD_ANIM_BUILDING;
     if (strcmp(str, "confused") == 0) return CLAWD_ANIM_CONFUSED;
+    if (strcmp(str, "sweeping") == 0) return CLAWD_ANIM_SWEEPING;
     return -1;
 }
 
