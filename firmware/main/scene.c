@@ -23,6 +23,7 @@
 #include "assets/sprite_confused.h"
 #include "assets/sprite_sweeping.h"
 #include "assets/sprite_walking.h"
+#include "assets/sprite_going_away.h"
 #include "rle_sprite.h"
 #include "pixel_font.h"
 
@@ -47,6 +48,7 @@
 #define BUILDING_FRAME_MS  (1000 / 8)   /* 125ms @ 8fps */
 #define CONFUSED_FRAME_MS  (1000 / 8)   /* 125ms @ 8fps */
 #define SWEEPING_FRAME_MS  (1000 / 8)   /* 125ms @ 8fps */
+#define GOING_AWAY_FRAME_MS (1000 / 8)  /* 125ms @ 8fps */
 
 /* ---------- Animation metadata ---------- */
 
@@ -182,6 +184,16 @@ static const anim_def_t anim_defs[] = {
         .height = WALKING_HEIGHT,
         .y_offset = 8,
     },
+    [CLAWD_ANIM_GOING_AWAY] = {
+        .rle_data = going_away_rle_data,
+        .frame_offsets = going_away_frame_offsets,
+        .frame_count = GOING_AWAY_FRAME_COUNT,
+        .frame_ms = GOING_AWAY_FRAME_MS,
+        .looping = false,  /* oneshot — plays once then done */
+        .width = GOING_AWAY_WIDTH,
+        .height = GOING_AWAY_HEIGHT,
+        .y_offset = 8,
+    },
 };
 
 /* ---------- Multi-slot support ---------- */
@@ -201,6 +213,7 @@ typedef struct {
     int x_off;             /* last alignment x offset (for re-align after oneshot) */
     bool active;
     bool walking_in;       /* true while walk-in slide animation is running */
+    bool departing;        /* true while going-away exit animation is playing */
 } clawd_slot_t;
 
 /* ---------- Star config ---------- */
@@ -360,6 +373,7 @@ static void scene_activate_slot(scene_t *s, int idx, clawd_anim_id_t anim)
     slot->last_frame_tick = lv_tick_get();
     slot->x_off = 0;
     slot->walking_in = false;
+    slot->departing = false;
     decode_and_apply_frame(slot);
     const anim_def_t *def = &anim_defs[anim];
     lv_obj_set_size(slot->sprite_img, def->width, def->height);
@@ -448,6 +462,7 @@ scene_t *scene_create(lv_obj_t *parent)
         s->slots[i].frame_buf = NULL;
         s->slots[i].frame_buf_size = 0;
         s->slots[i].display_id = 0;
+        s->slots[i].departing = false;
     }
     s->active_slot_count = 1;
     s->narrow = false;
@@ -503,7 +518,16 @@ void scene_set_width(scene_t *scene, int width_px, int anim_ms)
     /* In narrow mode, hide all slots except 0; restore when going wide */
     if (scene->narrow && !was_narrow) {
         for (int i = 1; i < MAX_SLOTS; i++) {
-            if (scene->slots[i].active && scene->slots[i].sprite_img) {
+            if (scene->slots[i].departing && scene->slots[i].sprite_img) {
+                /* Kill departing animation immediately in narrow mode */
+                lv_obj_delete(scene->slots[i].sprite_img);
+                scene->slots[i].sprite_img = NULL;
+                free(scene->slots[i].frame_buf);
+                scene->slots[i].frame_buf = NULL;
+                scene->slots[i].frame_buf_size = 0;
+                scene->slots[i].active = false;
+                scene->slots[i].departing = false;
+            } else if (scene->slots[i].active && scene->slots[i].sprite_img) {
                 lv_obj_add_flag(scene->slots[i].sprite_img, LV_OBJ_FLAG_HIDDEN);
             }
         }
@@ -677,6 +701,19 @@ void scene_tick(scene_t *scene)
                 if (slot->frame_idx < def->frame_count - 1) {
                     slot->frame_idx++;
                 } else {
+                    if (slot->departing) {
+                        /* Departing slot's exit animation finished — remove it */
+                        if (slot->sprite_img) {
+                            lv_obj_delete(slot->sprite_img);
+                            slot->sprite_img = NULL;
+                        }
+                        free(slot->frame_buf);
+                        slot->frame_buf = NULL;
+                        slot->frame_buf_size = 0;
+                        slot->active = false;
+                        slot->departing = false;
+                        continue;
+                    }
                     /* Oneshot finished — auto-return to fallback.
                      * Must update widget size and alignment since the fallback
                      * animation may have different dimensions than the oneshot. */
@@ -797,9 +834,9 @@ void scene_set_sessions(scene_t *s, const uint8_t *anims, const uint16_t *ids,
         slot->x_off = 0;
         slot->fallback_anim = new_anim;
 
-        /* Deactivate extra slots first (fade-out removed sessions) */
+        /* Deactivate extra slots — play going-away exit animation */
         for (int i = 1; i < MAX_SLOTS; i++) {
-            if (s->slots[i].active) {
+            if (s->slots[i].active && !s->slots[i].departing) {
                 if (s->narrow) {
                     /* Narrow: delete immediately */
                     if (s->slots[i].sprite_img) {
@@ -812,21 +849,17 @@ void scene_set_sessions(scene_t *s, const uint8_t *anims, const uint16_t *ids,
                     s->slots[i].frame_buf_size = 0;
                     s->slots[i].active = false;
                 } else if (s->slots[i].sprite_img) {
-                    /* Full width: fade out */
+                    /* Full width: play going-away burrowing animation */
                     lv_anim_delete(s->slots[i].sprite_img, (lv_anim_exec_xcb_t)lv_obj_set_x);
-                    lv_anim_t a;
-                    lv_anim_init(&a);
-                    lv_anim_set_var(&a, s->slots[i].sprite_img);
-                    lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_TRANSP);
-                    lv_anim_set_duration(&a, 400);
-                    lv_anim_set_exec_cb(&a, set_sprite_opa);
-                    lv_anim_set_completed_cb(&a, fade_complete_cb);
-                    lv_anim_start(&a);
-                    free(s->slots[i].frame_buf);
-                    s->slots[i].frame_buf = NULL;
-                    s->slots[i].frame_buf_size = 0;
-                    s->slots[i].sprite_img = NULL; /* orphaned to fade_complete_cb */
-                    s->slots[i].active = false;
+                    s->slots[i].departing = true;
+                    s->slots[i].cur_anim = CLAWD_ANIM_GOING_AWAY;
+                    s->slots[i].frame_idx = 0;
+                    s->slots[i].last_frame_tick = lv_tick_get();
+                    decode_and_apply_frame(&s->slots[i]);
+                    const anim_def_t *ga_def = &anim_defs[CLAWD_ANIM_GOING_AWAY];
+                    lv_obj_set_size(s->slots[i].sprite_img, ga_def->width, ga_def->height);
+                    lv_obj_align(s->slots[i].sprite_img, LV_ALIGN_BOTTOM_MID,
+                                 s->slots[i].x_off, ga_def->y_offset);
                 }
             }
         }
@@ -991,35 +1024,41 @@ void scene_set_sessions(scene_t *s, const uint8_t *anims, const uint16_t *ids,
         }
     }
 
-    /* Clean up removed slots — fade out and delete when done.
-     * In narrow mode, skip fade animation and delete immediately
+    /* Clean up removed slots — play going-away animation.
+     * In narrow mode, skip animation and delete immediately
      * to avoid orphan sprites visible within the 107px container. */
+    int departing_idx = count; /* first free slot after active ones */
     for (int i = 0; i < MAX_SLOTS; i++) {
         if (old_slots[i].sprite_img) {
             lv_anim_delete(old_slots[i].sprite_img, (lv_anim_exec_xcb_t)lv_obj_set_x);
             if (s->narrow) {
-                /* Narrow mode: delete immediately, no fade */
+                /* Narrow mode: delete immediately */
                 lv_obj_delete(old_slots[i].sprite_img);
+                free(old_slots[i].frame_buf);
+            } else if (departing_idx < MAX_SLOTS) {
+                /* Assign to a departing slot */
+                s->slots[departing_idx] = old_slots[i];
+                old_slots[i].sprite_img = NULL;
+                old_slots[i].frame_buf = NULL;
+                s->slots[departing_idx].departing = true;
+                s->slots[departing_idx].active = true;
+                s->slots[departing_idx].cur_anim = CLAWD_ANIM_GOING_AWAY;
+                s->slots[departing_idx].frame_idx = 0;
+                s->slots[departing_idx].last_frame_tick = lv_tick_get();
+                decode_and_apply_frame(&s->slots[departing_idx]);
+                const anim_def_t *def = &anim_defs[CLAWD_ANIM_GOING_AWAY];
+                lv_obj_set_size(s->slots[departing_idx].sprite_img, def->width, def->height);
+                lv_obj_align(s->slots[departing_idx].sprite_img, LV_ALIGN_BOTTOM_MID,
+                             s->slots[departing_idx].x_off, def->y_offset);
+                departing_idx++;
             } else {
-                /* Full width: fade out over 400ms */
-                lv_anim_t a;
-                lv_anim_init(&a);
-                lv_anim_set_var(&a, old_slots[i].sprite_img);
-                lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_TRANSP);
-                lv_anim_set_duration(&a, 400);
-                lv_anim_set_exec_cb(&a, set_sprite_opa);
-                lv_anim_set_completed_cb(&a, fade_complete_cb);
-                lv_anim_start(&a);
+                /* No free departing slot — fall back to immediate delete */
+                lv_obj_delete(old_slots[i].sprite_img);
+                free(old_slots[i].frame_buf);
             }
-            free(old_slots[i].frame_buf);
         } else {
             free(old_slots[i].frame_buf);
         }
-    }
-
-    /* Deactivate remaining slots beyond count */
-    for (int i = count; i < MAX_SLOTS; i++) {
-        s->slots[i].active = false;
     }
 
     /* In narrow mode, hide all slots except 0 and re-center slot 0 */
@@ -1063,7 +1102,7 @@ const char *anim_id_to_name(clawd_anim_id_t id)
     static const char *names[] = {
         "idle", "alert", "happy", "sleeping", "disconnected",
         "thinking", "typing", "juggling", "building", "confused",
-        "sweeping", "walking"
+        "sweeping", "walking", "going_away"
     };
     if ((int)id < (int)(sizeof(names) / sizeof(names[0]))) return names[id];
     return "unknown";
@@ -1093,6 +1132,7 @@ char *scene_get_state_json(scene_t *scene)
         cJSON_AddStringToObject(s, "fallback", anim_id_to_name(slot->fallback_anim));
         cJSON_AddNumberToObject(s, "frame_idx", slot->frame_idx);
         cJSON_AddBoolToObject(s, "walking_in", slot->walking_in);
+        cJSON_AddBoolToObject(s, "departing", slot->departing);
         cJSON_AddNumberToObject(s, "x_off", slot->x_off);
         if (slot->sprite_img) {
             cJSON_AddNumberToObject(s, "x", lv_obj_get_x(slot->sprite_img));

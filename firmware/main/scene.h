@@ -15,7 +15,8 @@ typedef enum {
     CLAWD_ANIM_BUILDING,
     CLAWD_ANIM_CONFUSED,
     CLAWD_ANIM_SWEEPING,
-    CLAWD_ANIM_WALKING,  /* crab-walking sideways (placeholder uses idle sprite) */
+    CLAWD_ANIM_WALKING,     /* crab-walking sideways (placeholder uses idle sprite) */
+    CLAWD_ANIM_GOING_AWAY,  /* burrowing into ground (oneshot, session exit) */
 } clawd_anim_id_t;
 
 scene_t *scene_create(lv_obj_t *parent);
