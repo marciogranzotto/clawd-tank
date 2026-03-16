@@ -482,6 +482,15 @@ scene_t *scene_create(lv_obj_t *parent)
     return s;
 }
 
+/* ---------- Multi-session X positions ---------- */
+
+static const int x_centers[][4] = {
+    {160},              /* 1 session */
+    {107, 213},         /* 2 sessions */
+    {80, 160, 240},     /* 3 sessions */
+    {64, 128, 192, 256} /* 4 sessions */
+};
+
 /* ---------- Width animation ---------- */
 
 void scene_set_width(scene_t *scene, int width_px, int anim_ms)
@@ -498,6 +507,28 @@ void scene_set_width(scene_t *scene, int width_px, int anim_ms)
                 lv_obj_add_flag(scene->slots[i].sprite_img, LV_OBJ_FLAG_HIDDEN);
             }
         }
+        /* Kill any orphan sprites from in-progress fade-out animations.
+         * These are LVGL children of the container that aren't tracked in
+         * any slot — they'd be visible within the narrow 107px container.
+         * Check each child against all known scene elements. */
+        uint32_t child_cnt = lv_obj_get_child_count(scene->container);
+        for (int ci = (int)child_cnt - 1; ci >= 0; ci--) {
+            lv_obj_t *child = lv_obj_get_child(scene->container, ci);
+            /* Check if this child is a known scene element */
+            bool is_known = (child == scene->sky || child == scene->grass ||
+                             child == scene->time_label || child == scene->noconn_label ||
+                             child == scene->hud_canvas);
+            if (!is_known) {
+                for (int si = 0; si < STAR_COUNT && !is_known; si++)
+                    if (scene->stars[si] == child) is_known = true;
+                for (int si = 0; si < MAX_SLOTS && !is_known; si++)
+                    if (scene->slots[si].sprite_img == child) is_known = true;
+            }
+            if (!is_known) {
+                lv_anim_delete(child, set_sprite_opa);
+                lv_obj_delete(child);
+            }
+        }
         /* Re-center slot 0 for narrow container */
         if (scene->slots[0].active) {
             scene->slots[0].x_off = 0;
@@ -505,9 +536,44 @@ void scene_set_width(scene_t *scene, int width_px, int anim_ms)
             lv_obj_align(scene->slots[0].sprite_img, LV_ALIGN_BOTTOM_MID, 0, def->y_offset);
         }
     } else if (!scene->narrow && was_narrow) {
-        for (int i = 1; i < MAX_SLOTS; i++) {
-            if (scene->slots[i].active && scene->slots[i].sprite_img) {
-                lv_obj_clear_flag(scene->slots[i].sprite_img, LV_OBJ_FLAG_HIDDEN);
+        /* Going wide: unhide slots 1+ and walk ALL slots to their
+         * correct multi-session positions (slot 0 was centered for narrow). */
+        int cnt = scene->active_slot_count;
+        for (int i = 0; i < cnt; i++) {
+            if (!scene->slots[i].active || !scene->slots[i].sprite_img) continue;
+            if (i > 0) lv_obj_clear_flag(scene->slots[i].sprite_img, LV_OBJ_FLAG_HIDDEN);
+
+            int target_x_off = (cnt >= 2) ? x_centers[cnt - 1][i] - 160 : 0;
+            int old_x_off = scene->slots[i].x_off;
+            scene->slots[i].x_off = target_x_off;
+
+            if (old_x_off != target_x_off && !scene->slots[i].walking_in) {
+                /* Walk to new position */
+                clawd_anim_id_t target_anim = scene->slots[i].cur_anim;
+                scene->slots[i].fallback_anim = target_anim;
+                scene->slots[i].cur_anim = CLAWD_ANIM_WALKING;
+                scene->slots[i].frame_idx = 0;
+                scene->slots[i].last_frame_tick = lv_tick_get();
+                decode_and_apply_frame(&scene->slots[i]);
+                const anim_def_t *walk_def = &anim_defs[CLAWD_ANIM_WALKING];
+                lv_obj_set_size(scene->slots[i].sprite_img, walk_def->width, walk_def->height);
+
+                scene->slots[i].walking_in = true;
+                lv_anim_t a;
+                lv_anim_init(&a);
+                lv_anim_set_var(&a, scene->slots[i].sprite_img);
+                lv_anim_set_values(&a, old_x_off, target_x_off);
+                lv_anim_set_duration(&a, 600);
+                lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+                lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_obj_set_x);
+                lv_anim_set_completed_cb(&a, walk_in_complete_cb);
+                lv_anim_start(&a);
+            } else if (!scene->slots[i].walking_in) {
+                /* Same position or single session — just realign */
+                const anim_def_t *def = &anim_defs[scene->slots[i].cur_anim];
+                lv_obj_set_size(scene->slots[i].sprite_img, def->width, def->height);
+                lv_obj_align(scene->slots[i].sprite_img, LV_ALIGN_BOTTOM_MID,
+                             target_x_off, def->y_offset);
             }
         }
     }
@@ -652,13 +718,6 @@ bool scene_is_playing_oneshot(scene_t *scene)
 
 /* ---------- Multi-session positioning ---------- */
 
-static const int x_centers[][4] = {
-    {160},              /* 1 session */
-    {107, 213},         /* 2 sessions */
-    {80, 160, 240},     /* 3 sessions */
-    {64, 128, 192, 256} /* 4 sessions */
-};
-
 static int find_id_in(const uint16_t *ids, int count, uint16_t target)
 {
     for (int i = 0; i < count; i++) {
@@ -726,40 +785,88 @@ void scene_set_sessions(scene_t *s, const uint8_t *anims, const uint16_t *ids,
         }
 
         slot->display_id = ids[0];
-        slot->x_off = 0;
 
         clawd_anim_id_t new_anim = (clawd_anim_id_t)anims[0];
-
-        /* Respect oneshot: set fallback, only change cur_anim if not
-         * currently playing a oneshot animation. */
+        int old_x_off = slot->x_off;
+        slot->x_off = 0;
         slot->fallback_anim = new_anim;
 
-        const anim_def_t *cur_def = &anim_defs[slot->cur_anim];
-        bool playing_oneshot = !cur_def->looping &&
-                               slot->frame_idx < cur_def->frame_count - 1;
+        /* Deactivate extra slots first (fade-out removed sessions) */
+        for (int i = 1; i < MAX_SLOTS; i++) {
+            if (s->slots[i].active) {
+                if (s->narrow) {
+                    /* Narrow: delete immediately */
+                    if (s->slots[i].sprite_img) {
+                        lv_anim_delete(s->slots[i].sprite_img, (lv_anim_exec_xcb_t)lv_obj_set_x);
+                        lv_obj_delete(s->slots[i].sprite_img);
+                        s->slots[i].sprite_img = NULL;
+                    }
+                    free(s->slots[i].frame_buf);
+                    s->slots[i].frame_buf = NULL;
+                    s->slots[i].frame_buf_size = 0;
+                    s->slots[i].active = false;
+                } else if (s->slots[i].sprite_img) {
+                    /* Full width: fade out */
+                    lv_anim_delete(s->slots[i].sprite_img, (lv_anim_exec_xcb_t)lv_obj_set_x);
+                    lv_anim_t a;
+                    lv_anim_init(&a);
+                    lv_anim_set_var(&a, s->slots[i].sprite_img);
+                    lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_TRANSP);
+                    lv_anim_set_duration(&a, 400);
+                    lv_anim_set_exec_cb(&a, set_sprite_opa);
+                    lv_anim_set_completed_cb(&a, fade_complete_cb);
+                    lv_anim_start(&a);
+                    free(s->slots[i].frame_buf);
+                    s->slots[i].frame_buf = NULL;
+                    s->slots[i].frame_buf_size = 0;
+                    s->slots[i].sprite_img = NULL; /* orphaned to fade_complete_cb */
+                    s->slots[i].active = false;
+                }
+            }
+        }
 
-        if (!playing_oneshot && slot->cur_anim != new_anim) {
-            slot->cur_anim = new_anim;
+        if (slot->walking_in) {
+            /* Already walking — just update fallback and target */
+        } else if (old_x_off != 0 && !s->narrow) {
+            /* Position changed (returning from multi-session to center) — walk */
+            slot->cur_anim = CLAWD_ANIM_WALKING;
             slot->frame_idx = 0;
             slot->last_frame_tick = lv_tick_get();
             decode_and_apply_frame(slot);
-            const anim_def_t *def = &anim_defs[new_anim];
+            const anim_def_t *walk_def = &anim_defs[CLAWD_ANIM_WALKING];
+            lv_obj_set_size(slot->sprite_img, walk_def->width, walk_def->height);
+
+            slot->walking_in = true;
+            lv_anim_t a;
+            lv_anim_init(&a);
+            lv_anim_set_var(&a, slot->sprite_img);
+            lv_anim_set_values(&a, old_x_off, 0);
+            lv_anim_set_duration(&a, 600);
+            lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+            lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_obj_set_x);
+            lv_anim_set_completed_cb(&a, walk_in_complete_cb);
+            lv_anim_start(&a);
+        } else {
+            /* Same position or narrow — update animation in place */
+            const anim_def_t *cur_def = &anim_defs[slot->cur_anim];
+            bool playing_oneshot = !cur_def->looping &&
+                                   slot->frame_idx < cur_def->frame_count - 1;
+            if (!playing_oneshot && slot->cur_anim != new_anim) {
+                slot->cur_anim = new_anim;
+                slot->frame_idx = 0;
+                slot->last_frame_tick = lv_tick_get();
+                decode_and_apply_frame(slot);
+            }
+            const anim_def_t *def = &anim_defs[slot->cur_anim];
             lv_obj_set_size(slot->sprite_img, def->width, def->height);
             lv_obj_align(slot->sprite_img, LV_ALIGN_BOTTOM_MID, 0, def->y_offset);
-        }
-
-        /* Deactivate any extra slots from a previous multi-session state */
-        for (int i = 1; i < MAX_SLOTS; i++) {
-            if (s->slots[i].active) {
-                scene_deactivate_slot(s, i);
-            }
         }
 
         scene_update_hud(s, subagent_count, overflow);
         s->active_slot_count = 1;
 
-        printf("[scene] set_sessions single id=%d anim=%d playing_oneshot=%d\n",
-               ids[0], new_anim, playing_oneshot);
+        printf("[scene] set_sessions single id=%d anim=%d walking=%d old_x=%d\n",
+               ids[0], new_anim, slot->walking_in, old_x_off);
         return;
     }
 
@@ -805,23 +912,46 @@ void scene_set_sessions(scene_t *s, const uint8_t *anims, const uint16_t *ids,
 
             if (s->slots[new_i].walking_in) {
                 /* Walk-in animation still running — don't interrupt it.
-                 * Just update fallback so it switches to the right anim on arrival. */
+                 * Just update fallback and target position. */
                 s->slots[new_i].fallback_anim = new_anim;
             } else {
-                /* Update animation if it changed */
-                if (s->slots[new_i].cur_anim != new_anim) {
-                    s->slots[new_i].cur_anim = new_anim;
-                    s->slots[new_i].fallback_anim = new_anim;
+                int old_x_off = old_slots[old_i].x_off;
+                s->slots[new_i].fallback_anim = new_anim;
+
+                if (old_x_off != x_off) {
+                    /* Position changed — walk to new position.
+                     * Switch to walking animation, slide from old to new x_off,
+                     * gate the target animation in fallback_anim. */
+                    s->slots[new_i].cur_anim = CLAWD_ANIM_WALKING;
                     s->slots[new_i].frame_idx = 0;
                     s->slots[new_i].last_frame_tick = lv_tick_get();
                     decode_and_apply_frame(&s->slots[new_i]);
-                }
+                    const anim_def_t *walk_def = &anim_defs[CLAWD_ANIM_WALKING];
+                    lv_obj_set_size(s->slots[new_i].sprite_img, walk_def->width, walk_def->height);
 
-                /* Reposition */
-                const anim_def_t *def = &anim_defs[s->slots[new_i].cur_anim];
-                lv_obj_set_size(s->slots[new_i].sprite_img, def->width, def->height);
-                lv_obj_align(s->slots[new_i].sprite_img, LV_ALIGN_BOTTOM_MID,
-                             x_off, def->y_offset);
+                    s->slots[new_i].walking_in = true;
+                    lv_anim_t a;
+                    lv_anim_init(&a);
+                    lv_anim_set_var(&a, s->slots[new_i].sprite_img);
+                    lv_anim_set_values(&a, old_x_off, x_off);
+                    lv_anim_set_duration(&a, 600);
+                    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+                    lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_obj_set_x);
+                    lv_anim_set_completed_cb(&a, walk_in_complete_cb);
+                    lv_anim_start(&a);
+                } else {
+                    /* Same position — update animation in place */
+                    if (s->slots[new_i].cur_anim != new_anim) {
+                        s->slots[new_i].cur_anim = new_anim;
+                        s->slots[new_i].frame_idx = 0;
+                        s->slots[new_i].last_frame_tick = lv_tick_get();
+                        decode_and_apply_frame(&s->slots[new_i]);
+                    }
+                    const anim_def_t *def = &anim_defs[s->slots[new_i].cur_anim];
+                    lv_obj_set_size(s->slots[new_i].sprite_img, def->width, def->height);
+                    lv_obj_align(s->slots[new_i].sprite_img, LV_ALIGN_BOTTOM_MID,
+                                 x_off, def->y_offset);
+                }
             }
         } else {
             /* New session — walk in from off-screen right.
@@ -855,22 +985,26 @@ void scene_set_sessions(scene_t *s, const uint8_t *anims, const uint16_t *ids,
         }
     }
 
-    /* Clean up removed slots — fade out and delete when done */
+    /* Clean up removed slots — fade out and delete when done.
+     * In narrow mode, skip fade animation and delete immediately
+     * to avoid orphan sprites visible within the 107px container. */
     for (int i = 0; i < MAX_SLOTS; i++) {
         if (old_slots[i].sprite_img) {
-            /* Cancel any walk-in animation before starting fade-out
-             * to avoid use-after-free if fade deletes sprite first */
             lv_anim_delete(old_slots[i].sprite_img, (lv_anim_exec_xcb_t)lv_obj_set_x);
-            /* This slot wasn't transferred — fade out over 400ms */
-            lv_anim_t a;
-            lv_anim_init(&a);
-            lv_anim_set_var(&a, old_slots[i].sprite_img);
-            lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_TRANSP);
-            lv_anim_set_duration(&a, 400);
-            lv_anim_set_exec_cb(&a, set_sprite_opa);
-            lv_anim_set_completed_cb(&a, fade_complete_cb);
-            lv_anim_start(&a);
-            /* Free frame_buf now — sprite image already has decoded pixels */
+            if (s->narrow) {
+                /* Narrow mode: delete immediately, no fade */
+                lv_obj_delete(old_slots[i].sprite_img);
+            } else {
+                /* Full width: fade out over 400ms */
+                lv_anim_t a;
+                lv_anim_init(&a);
+                lv_anim_set_var(&a, old_slots[i].sprite_img);
+                lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_TRANSP);
+                lv_anim_set_duration(&a, 400);
+                lv_anim_set_exec_cb(&a, set_sprite_opa);
+                lv_anim_set_completed_cb(&a, fade_complete_cb);
+                lv_anim_start(&a);
+            }
             free(old_slots[i].frame_buf);
         } else {
             free(old_slots[i].frame_buf);

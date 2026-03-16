@@ -7,16 +7,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SIM_DIR="$SCRIPT_DIR/../simulator"
 SIM_BINARY="$SIM_DIR/build-static/clawd-tank-sim"
 
-# Build static simulator if missing or outdated
-if [ ! -f "$SIM_BINARY" ] || [ "$SIM_DIR/CMakeLists.txt" -nt "$SIM_BINARY" ]; then
-    echo "==> Building static simulator..."
-    cd "$SIM_DIR"
-    cmake -B build-static -DSTATIC_SDL2=ON
-    cmake --build build-static
-    cd "$SCRIPT_DIR"
-else
-    echo "==> Simulator binary up to date"
-fi
+# Always rebuild static simulator — cmake handles incremental builds
+echo "==> Building static simulator..."
+cd "$SIM_DIR"
+cmake -B build-static -DSTATIC_SDL2=ON
+cmake --build build-static
+cd "$SCRIPT_DIR"
 
 # Build .app with py2app
 echo "==> Building .app bundle..."

@@ -174,8 +174,6 @@ void ui_manager_handle_event(const ble_evt_t *evt)
     case BLE_EVT_CONNECTED:
         ESP_LOGI(TAG, "Connected");
         s_connected = true;
-        /* Happy reaction on reconnect per spec */
-        scene_set_clawd_anim(s_scene, CLAWD_ANIM_HAPPY);
         /* Transition based on notification count */
         if (notif_store_count(&s_store) > 0) {
             transition_to(UI_STATE_NOTIFICATION);
@@ -214,8 +212,6 @@ void ui_manager_handle_event(const ble_evt_t *evt)
         notif_store_dismiss(&s_store, evt->id);
 
         if (notif_store_count(&s_store) == 0) {
-            /* Last notification cleared — happy then idle */
-            scene_set_clawd_anim(s_scene, CLAWD_ANIM_HAPPY);
             transition_to(UI_STATE_FULL_IDLE);
         } else {
             notification_ui_rebuild(s_notif_ui, &s_store);
@@ -226,7 +222,6 @@ void ui_manager_handle_event(const ble_evt_t *evt)
     case BLE_EVT_NOTIF_CLEAR:
         ESP_LOGI(TAG, "Clear all");
         notif_store_clear(&s_store);
-        scene_set_clawd_anim(s_scene, CLAWD_ANIM_HAPPY);
         transition_to(UI_STATE_FULL_IDLE);
         s_last_activity_tick = lv_tick_get();
         break;
