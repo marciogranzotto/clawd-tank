@@ -6,8 +6,8 @@
 
 ### Added
 
-- **StopFailure hook** — New Claude Code `StopFailure` hook (v2.1.78) shows a DIZZY animation (X eyes, band-aid, orbiting stars), error notification card, and triple red LED flash when a session hits an API error (rate limit, auth failure). Error state persists until user resumes or session ends.
-- **DIZZY sprite animation** — New `CLAWD_ANIM_DIZZY` sprite (92×72, 32 frames @ 8fps) for the error/crashed state. Generated via Gemini, auto-cropped.
+- **StopFailure hook** — New Claude Code `StopFailure` hook (v2.1.78) shows a DIZZY animation (X eyes, orbiting stars), error notification card, and triple red LED flash when a session hits an API error (rate limit, auth failure). Error state persists until user resumes or session ends.
+- **DIZZY sprite animation** — New `CLAWD_ANIM_DIZZY` sprite (92×72, 32 frames @ 8fps) with X eyes and orbiting stars for the error/crashed state. Generated via Gemini, auto-cropped.
 
 ### Fixed
 
