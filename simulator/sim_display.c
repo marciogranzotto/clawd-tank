@@ -3,9 +3,13 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <SDL.h>
+#include <SDL_syswm.h>
 #ifdef __APPLE__
 #include <objc/objc.h>
 #include <objc/message.h>
+/* NSFloatingWindowLevel = CGWindowLevelForKey(kCGFloatingWindowLevelKey) = 3 */
+#define NS_FLOATING_WINDOW_LEVEL 3
+#define NS_NORMAL_WINDOW_LEVEL   0
 #endif
 
 /* Border width in native pixels (scaled with window) */
@@ -300,11 +304,30 @@ void sim_display_enforce_aspect_ratio(void)
 
 /* ---- Always-on-top ---- */
 
+static void apply_pinned(void)
+{
+#ifdef __APPLE__
+    /* Bypass SDL and set NSWindow level directly via Cocoa API.
+     * SDL_SetWindowAlwaysOnTop doesn't work reliably with
+     * SDL_HINT_MAC_BACKGROUND_APP on macOS. */
+    SDL_SysWMinfo info;
+    SDL_VERSION(&info.version);
+    if (SDL_GetWindowWMInfo(s_window, &info) && info.subsystem == SDL_SYSWM_COCOA) {
+        id nswindow = (id)info.info.cocoa.window;
+        long level = s_pinned ? NS_FLOATING_WINDOW_LEVEL : NS_NORMAL_WINDOW_LEVEL;
+        ((void(*)(id, SEL, long))objc_msgSend)(nswindow,
+                    sel_registerName("setLevel:"), level);
+    }
+#else
+    SDL_SetWindowAlwaysOnTop(s_window, s_pinned ? SDL_TRUE : SDL_FALSE);
+#endif
+}
+
 void sim_display_set_pinned(bool pinned)
 {
     s_pinned = pinned;
     if (!s_window) return;
-    SDL_SetWindowAlwaysOnTop(s_window, pinned ? SDL_TRUE : SDL_FALSE);
+    apply_pinned();
 }
 
 /* ---- Show / Hide / Clear-quit ---- */
@@ -316,7 +339,7 @@ void sim_display_show_window(void)
     SDL_RaiseWindow(s_window);
     /* Re-apply always-on-top — macOS resets window level on show */
     if (s_pinned) {
-        SDL_SetWindowAlwaysOnTop(s_window, SDL_TRUE);
+        apply_pinned();
     }
     SDL_GetWindowSize(s_window, &s_prev_w, &s_prev_h);
     s_hidden = false;
