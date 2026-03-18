@@ -22,6 +22,7 @@ static uint16_t s_framebuffer[SIM_LCD_H_RES * SIM_LCD_V_RES];
 static bool s_headless = false;
 static bool s_quit = false;
 static bool s_hidden = false;
+static bool s_pinned = false;
 
 /* Simulated tick for headless mode */
 static uint32_t s_sim_tick = 0;
@@ -114,6 +115,7 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 lv_display_t *sim_display_init(bool headless, int scale, bool bordered, bool pinned)
 {
     s_headless = headless;
+    s_pinned = pinned;
     s_scale = scale > 0 ? scale : 3;
     memset(s_framebuffer, 0, sizeof(s_framebuffer));
 
@@ -300,6 +302,7 @@ void sim_display_enforce_aspect_ratio(void)
 
 void sim_display_set_pinned(bool pinned)
 {
+    s_pinned = pinned;
     if (!s_window) return;
     SDL_SetWindowAlwaysOnTop(s_window, pinned ? SDL_TRUE : SDL_FALSE);
 }
@@ -311,6 +314,10 @@ void sim_display_show_window(void)
     if (!s_window) return;
     SDL_ShowWindow(s_window);
     SDL_RaiseWindow(s_window);
+    /* Re-apply always-on-top — macOS resets window level on show */
+    if (s_pinned) {
+        SDL_SetWindowAlwaysOnTop(s_window, SDL_TRUE);
+    }
     SDL_GetWindowSize(s_window, &s_prev_w, &s_prev_h);
     s_hidden = false;
 }
