@@ -44,6 +44,20 @@ def hook_payload_to_daemon_message(hook: dict) -> Optional[dict]:
             "message": "Waiting for input",
         }
 
+    if event_name == "StopFailure":
+        cwd = hook.get("cwd", "")
+        project = Path(cwd).name if cwd else "unknown"
+        if not project:
+            project = "unknown"
+        message = hook.get("error", "") or hook.get("stop_reason", "") or "API error"
+        return {
+            "event": "add",
+            "hook": "StopFailure",
+            "session_id": session_id,
+            "project": project,
+            "message": message,
+        }
+
     if event_name == "Notification":
         if hook.get("notification_type") != "idle_prompt":
             return None
@@ -104,12 +118,15 @@ def daemon_message_to_ble_payload(msg: dict) -> Optional[str]:
         return None
 
     if event == "add":
-        return json.dumps({
+        payload = {
             "action": "add",
             "id": msg.get("session_id", ""),
             "project": msg.get("project", ""),
             "message": msg.get("message", ""),
-        })
+        }
+        if msg.get("hook") == "StopFailure":
+            payload["alert"] = "error"
+        return json.dumps(payload)
 
     if event == "dismiss":
         return json.dumps({
@@ -140,7 +157,7 @@ def display_state_to_v1_payload(state: dict) -> str:
         status = f"working_{min(working, 3)}"
     elif "thinking" in state.get("anims", []):
         status = "thinking"
-    elif "confused" in state.get("anims", []):
+    elif any(a in ("confused", "dizzy") for a in state.get("anims", [])):
         status = "confused"
     else:
         status = "idle"
