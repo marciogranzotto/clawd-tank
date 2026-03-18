@@ -1128,7 +1128,8 @@ void scene_set_sessions(scene_t *s, const uint8_t *anims, const uint16_t *ids,
     bool will_have_departing = false;
     if (!s->narrow) {
         for (int i = 0; i < old_count; i++) {
-            if (old_slots[i].active && find_id_in(ids, count, old_ids[i]) < 0) {
+            if (old_slots[i].active && old_ids[i] != 0
+                && find_id_in(ids, count, old_ids[i]) < 0) {
                 will_have_departing = true;
                 break;
             }
@@ -1143,6 +1144,17 @@ void scene_set_sessions(scene_t *s, const uint8_t *anims, const uint16_t *ids,
      * assuming 320px width; convert to offsets from center (160). */
     for (int new_i = 0; new_i < count; new_i++) {
         int old_i = find_id_in(old_ids, old_count, ids[new_i]);
+        /* Adopt unclaimed slot (display_id==0) for the first new session.
+         * This happens on first set_sessions after connect — the disconnect
+         * animation slot has no real ID, so adopt it rather than departing. */
+        if (old_i < 0 && new_i == 0) {
+            for (int j = 0; j < old_count; j++) {
+                if (old_slots[j].active && old_ids[j] == 0 && old_slots[j].sprite_img) {
+                    old_i = j;
+                    break;
+                }
+            }
+        }
         int x_off = x_centers[count - 1][new_i] - 160;
         if (old_i >= 0 && old_slots[old_i].active) {
             /* Existing session — move slot data, update animation if changed */
