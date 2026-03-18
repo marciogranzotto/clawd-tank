@@ -87,13 +87,13 @@ void scene_set_clawd_anim(scene_t *scene, clawd_anim_id_t anim)
     scene->active_slot_count = 1;
     scene->pending_reposition = false;
 
+    scene_update_hud(scene, 0, 0, 1);  /* reset HUD — no subagents/overflow */
+
     if (anim == slot->cur_anim) return;  /* moved after cleanup */
 
     /* ... rest unchanged ... */
 }
 ```
-
-Also reset HUD after cleanup: `scene_update_hud(scene, 0, 0, 1)` or hide HUD canvas.
 
 ## Fix 3: Connect — adopt unclaimed slot 0
 
@@ -101,7 +101,24 @@ Also reset HUD after cleanup: `scene_update_hud(scene, 0, 0, 1)` or hide HUD can
 
 **Root cause**: After connecting, slot 0 has `display_id=0` (from disconnect/boot state). The diff's `find_id_in` can't match it to any new session ID, so slot 0 becomes a departing slot with going-away animation. All new sessions walk in from off-screen, causing the "main clawd appears between new clawds then burrows away" visual.
 
-**Change**: In the matching loop, when `find_id_in` returns -1 for `new_i == 0`, check for an unclaimed old slot with `display_id == 0` and adopt it instead:
+**Change**: Two parts:
+
+**Part A — Pre-scan exclusion**: The `will_have_departing` pre-scan (~line 1107) runs before the matching loop. It would incorrectly flag `display_id=0` as departing (since it's not in the new IDs), which causes the adopted slot to enter the deferred-walk branch instead of the immediate-walk branch. Exclude `display_id == 0` from the pre-scan:
+
+```c
+bool will_have_departing = false;
+if (!s->narrow) {
+    for (int i = 0; i < old_count; i++) {
+        if (old_slots[i].active && old_ids[i] != 0  /* NEW: skip unclaimed */
+            && find_id_in(ids, count, old_ids[i]) < 0) {
+            will_have_departing = true;
+            break;
+        }
+    }
+}
+```
+
+**Part B — Adoption in matching loop**: When `find_id_in` returns -1 for `new_i == 0`, check for an unclaimed old slot with `display_id == 0` and adopt it:
 
 ```c
 for (int new_i = 0; new_i < count; new_i++) {
@@ -125,6 +142,8 @@ for (int new_i = 0; new_i < count; new_i++) {
     }
 }
 ```
+
+With the pre-scan fixed (Part A), `will_have_departing` is only true when real sessions depart. The adopted slot correctly enters the immediate-walk branch and walks from center (x_off=0) to its multi-session position.
 
 This only triggers when:
 - `new_i == 0` (first slot in the new set)
