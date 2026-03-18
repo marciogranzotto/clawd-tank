@@ -439,7 +439,11 @@ class ClawdTankApp(rumps.App, DaemonObserver):
     def _start_simulator(self):
         """Start the simulator process and add it as a transport."""
         from clawd_tank_daemon.sim_process import SimProcessManager
-        self._sim_process = SimProcessManager(on_window_event=self._on_sim_window_event)
+        prefs = load_preferences()
+        self._sim_process = SimProcessManager(
+            on_window_event=self._on_sim_window_event,
+            start_pinned=prefs.get("sim_always_on_top", True),
+        )
         self._transport_status["sim"] = False
 
         async def _do_start():
@@ -456,6 +460,8 @@ class ClawdTankApp(rumps.App, DaemonObserver):
                 prefs = load_preferences()
                 if prefs.get("sim_window_visible", True):
                     await self._sim_process.show_window()
+                    # Let macOS finish window presentation before setting level
+                    await asyncio.sleep(0.2)
                 await self._sim_process.set_pinned(prefs.get("sim_always_on_top", True))
 
         if self._loop and self._daemon:

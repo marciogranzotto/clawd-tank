@@ -14,11 +14,13 @@ logger = logging.getLogger("clawd-tank.sim-process")
 
 
 class SimProcessManager:
-    def __init__(self, port: int = SIM_DEFAULT_PORT, on_window_event: Optional[Callable] = None):
+    def __init__(self, port: int = SIM_DEFAULT_PORT, on_window_event: Optional[Callable] = None,
+                 start_pinned: bool = False):
         self._port = port
         self._process: Optional[asyncio.subprocess.Process] = None
         self._client: Optional[SimClient] = None
         self._on_window_event = on_window_event
+        self._start_pinned = start_pinned
 
     def _find_binary(self) -> Optional[str]:
         # 1. Next to sys.executable (inside .app bundle)
@@ -109,9 +111,12 @@ class SimProcessManager:
         if not binary:
             logger.error("clawd-tank-sim binary not found")
             return None
-        logger.info("Starting simulator: %s --listen %d --hidden", binary, self._port)
+        args = [binary, "--listen", str(self._port), "--hidden"]
+        if self._start_pinned:
+            args.append("--pinned")
+        logger.info("Starting simulator: %s", " ".join(args))
         self._process = await asyncio.create_subprocess_exec(
-            binary, "--listen", str(self._port), "--hidden",
+            *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
