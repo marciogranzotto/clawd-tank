@@ -159,7 +159,7 @@ static void handle_window_action(const char *buf, uint16_t len) {
     } else if (strcmp(action->valuestring, "set_window") == 0) {
         cJSON *pinned = cJSON_GetObjectItem(json, "pinned");
         cmd.type = SIM_WIN_CMD_SET_PINNED;
-        cmd.pinned = (pinned && cJSON_IsTrue(pinned));
+        cmd.pinned = pinned && (cJSON_IsTrue(pinned) || (cJSON_IsNumber(pinned) && pinned->valueint));
         win_queue_push(&cmd);
         printf("[tcp] Window cmd: set_pinned=%d\n", cmd.pinned);
     }

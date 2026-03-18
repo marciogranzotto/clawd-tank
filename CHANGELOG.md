@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-03-18
+
+### Added
+
+- **StopFailure hook** — New Claude Code `StopFailure` hook (v2.1.78) shows a DIZZY animation (X eyes, band-aid, orbiting stars), error notification card, and triple red LED flash when a session hits an API error (rate limit, auth failure). Error state persists until user resumes or session ends.
+- **DIZZY sprite animation** — New `CLAWD_ANIM_DIZZY` sprite (92×72, 32 frames @ 8fps) for the error/crashed state. Generated via Gemini, auto-cropped.
+
+### Fixed
+
+- **Simulator always-on-top** — Fixed always-on-top not working on macOS. Root cause: `SDL_HINT_MAC_BACKGROUND_APP` prevented the window manager from honoring `NSFloatingWindowLevel`. Fix bypasses SDL and sets the NSWindow level directly via native Cocoa API (`objc_msgSend`). Also re-applies pinned state after `SDL_ShowWindow` (macOS resets window level on show).
+- **Pinned preference parsing** — Fixed `cJSON_IsTrue` rejecting integer `1` from preferences JSON (rumps saves booleans as integers). Simulator TCP parser now accepts both JSON `true` and integer `1` as truthy for the pinned field.
+
 ## [1.3.0] - 2026-03-16
 
 ### Added

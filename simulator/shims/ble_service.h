@@ -40,6 +40,7 @@ typedef struct {
     uint16_t session_ids[MAX_VISIBLE_SESSIONS];
     uint8_t subagent_count;
     uint8_t session_overflow;
+    uint8_t alert;  /* 0=none, 1=error */
 } ble_evt_t;
 
 /* Stub — simulator does not init real BLE */

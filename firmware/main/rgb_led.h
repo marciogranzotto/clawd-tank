@@ -14,3 +14,6 @@ void rgb_led_set(uint8_t r, uint8_t g, uint8_t b);
 
 /** Flash the LED briefly: ramps up, holds, fades out. Non-blocking (uses a timer). */
 void rgb_led_flash(uint8_t r, uint8_t g, uint8_t b, int duration_ms);
+
+/** Flash the LED red three times. Non-blocking (uses a timer). */
+void rgb_led_flash_error(void);

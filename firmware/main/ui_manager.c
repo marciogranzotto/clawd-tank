@@ -196,7 +196,11 @@ void ui_manager_handle_event(const ble_evt_t *evt)
         /* Show new notification in expanded hero view, then auto-collapse */
         notification_ui_trigger_hero(s_notif_ui);
         /* Flash RGB LED behind acrylic */
-        rgb_led_flash(255, 140, 30, 800);
+        if (evt->alert) {
+            rgb_led_flash_error();
+        } else {
+            rgb_led_flash(255, 140, 30, 800);
+        }
 
         if (s_state != UI_STATE_NOTIFICATION) {
             transition_to(UI_STATE_NOTIFICATION);

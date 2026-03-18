@@ -15,6 +15,7 @@ static int parse_anim_name(const char *str) {
     if (strcmp(str, "building") == 0) return CLAWD_ANIM_BUILDING;
     if (strcmp(str, "confused") == 0) return CLAWD_ANIM_CONFUSED;
     if (strcmp(str, "sweeping") == 0) return CLAWD_ANIM_SWEEPING;
+    if (strcmp(str, "dizzy") == 0)    return CLAWD_ANIM_DIZZY;
     return -1;
 }
 
@@ -61,6 +62,8 @@ int sim_ble_parse_json(const char *buf, uint16_t len, ble_evt_t *out) {
         safe_strncpy(out->message,
                      message && cJSON_IsString(message) ? message->valuestring : "",
                      sizeof(out->message));
+        cJSON *alert = cJSON_GetObjectItem(json, "alert");
+        out->alert = (alert && cJSON_IsString(alert) && strcmp(alert->valuestring, "error") == 0) ? 1 : 0;
     } else if (strcmp(action->valuestring, "dismiss") == 0) {
         out->type = BLE_EVT_NOTIF_DISMISS;
         cJSON *id = cJSON_GetObjectItem(json, "id");

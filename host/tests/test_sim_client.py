@@ -211,6 +211,56 @@ async def test_send_command():
     assert len(received) == 1
     assert json.loads(received[0])["action"] == "show_window"
 
+
+@pytest.mark.asyncio
+async def test_send_command_pinned_bool():
+    """set_window with bool True sends JSON boolean true."""
+    received = []
+    async def handler(reader, writer):
+        while True:
+            line = await reader.readline()
+            if not line: break
+            received.append(line.decode().strip())
+        writer.close()
+
+    server, port = await start_mock_server(handler)
+    async with server:
+        client = SimClient(port=port)
+        await client.connect()
+        await client.send_command({"action": "set_window", "pinned": True})
+        await client.disconnect()
+        await asyncio.sleep(0.05)
+    parsed = json.loads(received[0])
+    assert parsed["pinned"] is True  # JSON boolean, not int
+
+
+@pytest.mark.asyncio
+async def test_send_command_pinned_int():
+    """set_window with int 1 (from preferences) sends JSON int 1.
+
+    The simulator parser must accept both boolean true and integer 1
+    as truthy for the pinned field, since preferences store bools as ints.
+    """
+    received = []
+    async def handler(reader, writer):
+        while True:
+            line = await reader.readline()
+            if not line: break
+            received.append(line.decode().strip())
+        writer.close()
+
+    server, port = await start_mock_server(handler)
+    async with server:
+        client = SimClient(port=port)
+        await client.connect()
+        await client.send_command({"action": "set_window", "pinned": 1})
+        await client.disconnect()
+        await asyncio.sleep(0.05)
+    parsed = json.loads(received[0])
+    # int 1 is serialized as JSON number 1, not boolean true
+    assert parsed["pinned"] == 1
+    # Simulator C parser must handle this — see sim_socket.c:162
+
 @pytest.mark.asyncio
 async def test_background_reader_receives_events():
     """Background reader should invoke on_event callback for unsolicited messages."""

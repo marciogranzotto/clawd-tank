@@ -3,6 +3,14 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <SDL.h>
+#include <SDL_syswm.h>
+#ifdef __APPLE__
+#include <objc/objc.h>
+#include <objc/message.h>
+/* NSFloatingWindowLevel = CGWindowLevelForKey(kCGFloatingWindowLevelKey) = 3 */
+#define NS_FLOATING_WINDOW_LEVEL 3
+#define NS_NORMAL_WINDOW_LEVEL   0
+#endif
 
 /* Border width in native pixels (scaled with window) */
 #define LED_BORDER_PX 4
@@ -18,6 +26,7 @@ static uint16_t s_framebuffer[SIM_LCD_H_RES * SIM_LCD_V_RES];
 static bool s_headless = false;
 static bool s_quit = false;
 static bool s_hidden = false;
+static bool s_pinned = false;
 
 /* Simulated tick for headless mode */
 static uint32_t s_sim_tick = 0;
@@ -107,9 +116,10 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 
 /* ---- Init ---- */
 
-lv_display_t *sim_display_init(bool headless, int scale, bool bordered)
+lv_display_t *sim_display_init(bool headless, int scale, bool bordered, bool pinned)
 {
     s_headless = headless;
+    s_pinned = pinned;
     s_scale = scale > 0 ? scale : 3;
     memset(s_framebuffer, 0, sizeof(s_framebuffer));
 
@@ -120,6 +130,16 @@ lv_display_t *sim_display_init(bool headless, int scale, bool bordered)
         /* Interactive: use SDL_GetTicks */
         SDL_SetHint(SDL_HINT_MAC_BACKGROUND_APP, "1");  /* Don't show in Dock */
         SDL_Init(SDL_INIT_VIDEO);
+#ifdef __APPLE__
+        /* Set activation policy to Accessory so the app hides from Dock
+         * but still supports NSFloatingWindowLevel (always-on-top).
+         * SDL_HINT_MAC_BACKGROUND_APP skips setActivationPolicy entirely,
+         * which breaks window level management on macOS. */
+        id nsapp = ((id(*)(id, SEL))objc_msgSend)((id)objc_getClass("NSApplication"),
+                    sel_registerName("sharedApplication"));
+        ((void(*)(id, SEL, long))objc_msgSend)(nsapp,
+                    sel_registerName("setActivationPolicy:"), 1 /* NSApplicationActivationPolicyAccessory */);
+#endif
         lv_tick_set_cb(sdl_tick_cb);
 
         int border = LED_BORDER_PX * s_scale;
@@ -128,6 +148,7 @@ lv_display_t *sim_display_init(bool headless, int scale, bool bordered)
 
         Uint32 flags = SDL_WINDOW_RESIZABLE;
         if (!bordered) flags |= SDL_WINDOW_BORDERLESS;
+        if (pinned) flags |= SDL_WINDOW_ALWAYS_ON_TOP;
         s_window = SDL_CreateWindow(
             "Clawd Tank Simulator",
             SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
@@ -283,10 +304,30 @@ void sim_display_enforce_aspect_ratio(void)
 
 /* ---- Always-on-top ---- */
 
+static void apply_pinned(void)
+{
+#ifdef __APPLE__
+    /* Bypass SDL and set NSWindow level directly via Cocoa API.
+     * SDL_SetWindowAlwaysOnTop doesn't work reliably with
+     * SDL_HINT_MAC_BACKGROUND_APP on macOS. */
+    SDL_SysWMinfo info;
+    SDL_VERSION(&info.version);
+    if (SDL_GetWindowWMInfo(s_window, &info) && info.subsystem == SDL_SYSWM_COCOA) {
+        id nswindow = (id)info.info.cocoa.window;
+        long level = s_pinned ? NS_FLOATING_WINDOW_LEVEL : NS_NORMAL_WINDOW_LEVEL;
+        ((void(*)(id, SEL, long))objc_msgSend)(nswindow,
+                    sel_registerName("setLevel:"), level);
+    }
+#else
+    SDL_SetWindowAlwaysOnTop(s_window, s_pinned ? SDL_TRUE : SDL_FALSE);
+#endif
+}
+
 void sim_display_set_pinned(bool pinned)
 {
+    s_pinned = pinned;
     if (!s_window) return;
-    SDL_SetWindowAlwaysOnTop(s_window, pinned ? SDL_TRUE : SDL_FALSE);
+    apply_pinned();
 }
 
 /* ---- Show / Hide / Clear-quit ---- */
@@ -296,6 +337,10 @@ void sim_display_show_window(void)
     if (!s_window) return;
     SDL_ShowWindow(s_window);
     SDL_RaiseWindow(s_window);
+    /* Re-apply always-on-top — macOS resets window level on show */
+    if (s_pinned) {
+        apply_pinned();
+    }
     SDL_GetWindowSize(s_window, &s_prev_w, &s_prev_h);
     s_hidden = false;
 }

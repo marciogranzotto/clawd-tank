@@ -56,6 +56,18 @@ NOTIFY_SCRIPT = textwrap.dedent('''\
                 "message": "Waiting for input",
             }
 
+        if event_name == "StopFailure":
+            cwd = hook.get("cwd", "")
+            project = Path(cwd).name if cwd else "unknown"
+            message = hook.get("error", "") or hook.get("stop_reason", "") or "API error"
+            return {
+                "event": "add",
+                "hook": "StopFailure",
+                "session_id": session_id,
+                "project": project or "unknown",
+                "message": message,
+            }
+
         if event_name == "Notification":
             if hook.get("notification_type") != "idle_prompt":
                 return None
@@ -127,6 +139,9 @@ HOOKS_CONFIG = {
         {"hooks": [{"type": "command", "command": HOOK_COMMAND}]}
     ],
     "Stop": [
+        {"hooks": [{"type": "command", "command": HOOK_COMMAND}]}
+    ],
+    "StopFailure": [
         {"hooks": [{"type": "command", "command": HOOK_COMMAND}]}
     ],
     "Notification": [

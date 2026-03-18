@@ -15,7 +15,7 @@
  * @param bordered  If true, create a normal bordered window; if false, borderless.
  * @return The LVGL display object.
  */
-lv_display_t *sim_display_init(bool headless, int scale, bool bordered);
+lv_display_t *sim_display_init(bool headless, int scale, bool bordered, bool pinned);
 
 /** Get pointer to the raw RGB565 framebuffer (320*172 uint16_t). */
 uint16_t *sim_display_get_framebuffer(void);

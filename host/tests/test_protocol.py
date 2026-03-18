@@ -392,3 +392,77 @@ def test_display_state_to_v1_sleeping():
     payload = display_state_to_v1_payload(state)
     parsed = json.loads(payload)
     assert parsed == {"action": "set_status", "status": "sleeping"}
+
+
+# --- StopFailure hook ---
+
+def test_stop_failure_produces_add_event():
+    hook = {
+        "hook_event_name": "StopFailure",
+        "session_id": "abc-123",
+        "cwd": "/Users/me/Projects/my-project",
+        "error": "Rate limit reached",
+    }
+    msg = hook_payload_to_daemon_message(hook)
+    assert msg is not None
+    assert msg["event"] == "add"
+    assert msg["hook"] == "StopFailure"
+    assert msg["session_id"] == "abc-123"
+    assert msg["project"] == "my-project"
+    assert msg["message"] == "Rate limit reached"
+
+
+def test_stop_failure_fallback_message():
+    hook = {
+        "hook_event_name": "StopFailure",
+        "session_id": "abc-123",
+        "cwd": "/tmp/proj",
+    }
+    msg = hook_payload_to_daemon_message(hook)
+    assert msg is not None
+    assert msg["message"] == "API error"
+
+
+def test_stop_failure_ble_payload_includes_alert():
+    msg = {
+        "event": "add",
+        "hook": "StopFailure",
+        "session_id": "s1",
+        "project": "proj",
+        "message": "Rate limited",
+    }
+    ble = daemon_message_to_ble_payload(msg)
+    parsed = json.loads(ble)
+    assert parsed["action"] == "add"
+    assert parsed["alert"] == "error"
+
+
+def test_normal_add_ble_payload_no_alert():
+    msg = {
+        "event": "add",
+        "hook": "Stop",
+        "session_id": "s1",
+        "project": "proj",
+        "message": "Waiting",
+    }
+    ble = daemon_message_to_ble_payload(msg)
+    parsed = json.loads(ble)
+    assert "alert" not in parsed
+
+
+def test_stop_failure_stop_reason_fallback():
+    hook = {
+        "hook_event_name": "StopFailure",
+        "session_id": "s1",
+        "cwd": "/tmp/proj",
+        "stop_reason": "max_turns",
+    }
+    msg = hook_payload_to_daemon_message(hook)
+    assert msg["message"] == "max_turns"
+
+
+def test_display_state_to_v1_dizzy_maps_to_confused():
+    state = {"anims": ["dizzy"], "ids": [1], "subagents": 0}
+    payload = display_state_to_v1_payload(state)
+    parsed = json.loads(payload)
+    assert parsed["status"] == "confused"

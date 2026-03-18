@@ -469,7 +469,7 @@ int main(int argc, char *argv[])
     lv_init();
 
     /* 2. Init display */
-    sim_display_init(opt_headless, opt_scale, opt_bordered);
+    sim_display_init(opt_headless, opt_scale, opt_bordered, opt_pinned);
 
     /* 3. Init events */
     if (opt_events) sim_events_init_inline(opt_events);
@@ -486,10 +486,8 @@ int main(int argc, char *argv[])
     /* 4. Init UI manager (creates scene + notification panel) */
     ui_manager_init();
 
-    /* 4b. Apply pinned mode */
-    if (opt_pinned) {
-        sim_display_set_pinned(true);
-    }
+    /* 4b. Pinned mode applied via SDL_WINDOW_ALWAYS_ON_TOP at creation.
+     * Runtime toggling via TCP set_window uses sim_display_set_pinned(). */
 
     /* 4c. Apply hidden mode */
     if (opt_hidden) {

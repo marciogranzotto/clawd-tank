@@ -26,6 +26,7 @@
 #include "assets/sprite_juggling.h"
 #include "assets/sprite_building.h"
 #include "assets/sprite_confused.h"
+#include "assets/sprite_dizzy.h"
 #include "assets/sprite_sweeping.h"
 #include "assets/sprite_walking.h"
 #include "assets/sprite_going_away.h"
@@ -53,6 +54,7 @@
 #define JUGGLING_FRAME_MS  (1000 / 8)   /* 125ms @ 8fps */
 #define BUILDING_FRAME_MS  (1000 / 8)   /* 125ms @ 8fps */
 #define CONFUSED_FRAME_MS  (1000 / 8)   /* 125ms @ 8fps */
+#define DIZZY_FRAME_MS     (1000 / 8)   /* 125ms @ 8fps */
 #define SWEEPING_FRAME_MS  (1000 / 8)   /* 125ms @ 8fps */
 #define GOING_AWAY_FRAME_MS (1000 / 8)  /* 125ms @ 8fps */
 
@@ -169,6 +171,16 @@ static const anim_def_t anim_defs[] = {
         .width = CONFUSED_WIDTH,
         .height = CONFUSED_HEIGHT,
         .y_offset = -4,   /* 8 - 12 */
+    },
+    [CLAWD_ANIM_DIZZY] = {
+        .rle_data = dizzy_rle_data,
+        .frame_offsets = dizzy_frame_offsets,
+        .frame_count = DIZZY_FRAME_COUNT,
+        .frame_ms = DIZZY_FRAME_MS,
+        .looping = true,
+        .width = DIZZY_WIDTH,
+        .height = DIZZY_HEIGHT,
+        .y_offset = -8,
     },
     [CLAWD_ANIM_SWEEPING] = {
         .rle_data = sweeping_rle_data,
@@ -1287,7 +1299,7 @@ const char *anim_id_to_name(clawd_anim_id_t id)
     static const char *names[] = {
         "idle", "alert", "happy", "sleeping", "disconnected",
         "thinking", "typing", "juggling", "building", "confused",
-        "sweeping", "walking", "going_away", "mini_clawd"
+        "dizzy", "sweeping", "walking", "going_away", "mini_clawd"
     };
     if ((int)id < (int)(sizeof(names) / sizeof(names[0]))) return names[id];
     return "unknown";

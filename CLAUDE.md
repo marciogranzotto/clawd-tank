@@ -136,7 +136,7 @@ python tools/ble_interactive.py
 ### Data Flow
 
 ```
-Claude Code hooks (SessionStart/PreToolUse/PreCompact/Stop/Notification/UserPromptSubmit/SessionEnd/SubagentStart/SubagentStop)
+Claude Code hooks (SessionStart/PreToolUse/PreCompact/Stop/StopFailure/Notification/UserPromptSubmit/SessionEnd/SubagentStart/SubagentStop)
     → ~/.clawd-tank/clawd-tank-notify → Unix socket → clawd_tank_daemon → BLE → ESP32-C6 firmware
                                                                         ↘ TCP → Simulator (SDL2)
     Session state tracking (daemon):
@@ -154,7 +154,7 @@ Claude Code hooks (SessionStart/PreToolUse/PreCompact/Stop/Notification/UserProm
 - **main.c** — Entry point. Creates FreeRTOS event queue, inits display/BLE, spawns `ui_task`.
 - **ble_service.c** — NimBLE GATT server. Parses JSON payloads (`add`/`dismiss`/`clear`/`set_time`/`set_status`/`set_sessions` actions), posts `ble_evt_t` to queue. Handles time sync and timezone from host. Exposes a protocol version GATT characteristic (v2) for capability negotiation.
 - **ui_manager.c** — State machine coordinator. Bridges BLE events to scene and notification UI. Handles `set_status` for working animations with backlight control for sleep/wake. Time display, RGB LED flash, LVGL tick.
-- **scene.c** — Clawd sprite animation engine. 14 animations (IDLE, ALERT, HAPPY, SLEEPING, DISCONNECTED, THINKING, TYPING, JUGGLING, BUILDING, CONFUSED, SWEEPING, GOING_AWAY, WALKING, MINI_CLAWD). Multi-slot rendering with `MAX_VISIBLE=4` display slots and `MAX_SLOTS=6` on firmware / `MAX_SLOTS=8` on simulator (extra slots for departing animations). Walk-in animation for new sessions, going-away burrowing animation for session exits with deferred repositioning. HUD overlay with pixel-art bitmap font for subagent counter and session overflow badge. Fallback animation mechanism for oneshot return. Manages sky/stars/grass background and scene width transitions (107px with notifications, 320px idle). Firmware uses RGB565A8 pixel format (3 bytes/pixel) for frame buffers; simulator uses ARGB8888 (4 bytes/pixel). Debug introspection via `scene_get_state_json()` for `query_state` TCP action.
+- **scene.c** — Clawd sprite animation engine. 15 animations (IDLE, ALERT, HAPPY, SLEEPING, DISCONNECTED, THINKING, TYPING, JUGGLING, BUILDING, CONFUSED, DIZZY, SWEEPING, GOING_AWAY, WALKING, MINI_CLAWD). Multi-slot rendering with `MAX_VISIBLE=4` display slots and `MAX_SLOTS=6` on firmware / `MAX_SLOTS=8` on simulator (extra slots for departing animations). Walk-in animation for new sessions, going-away burrowing animation for session exits with deferred repositioning. HUD overlay with pixel-art bitmap font for subagent counter and session overflow badge. Fallback animation mechanism for oneshot return. Manages sky/stars/grass background and scene width transitions (107px with notifications, 320px idle). Firmware uses RGB565A8 pixel format (3 bytes/pixel) for frame buffers; simulator uses ARGB8888 (4 bytes/pixel). Debug introspection via `scene_get_state_json()` for `query_state` TCP action.
 - **notification_ui.c** — LVGL card rendering. Auto-rotating featured card + compact list. 8-color accent palette.
 - **notification.c** — Ring buffer store (max 8 notifications). Tracks by 48-char ID + sequence counter.
 - **rgb_led.c** — WS2812B driver for onboard RGB LED (GPIO8). Non-blocking flash with linear fade-out via esp_timer.
@@ -182,11 +182,11 @@ Key simulator-specific files:
 
 The daemon tracks per-session state and computes display state sent to the device. Protocol v2 transports receive per-session animations; v1 transports receive a single aggregated animation.
 
-- **Per-session states**: `registered` → `thinking` → `working` → `idle` → `confused`
+- **Per-session states**: `registered` → `thinking` → `working` → `idle` → `confused` / `error`
 - **Protocol v2 (multi-session)**: Each session gets its own animation and stable UUID. Up to `MAX_VISIBLE=4` sessions shown simultaneously with individual Clawd sprites. Per-session sweeping sends sweep animation only to the compacting session.
 - **Protocol v1 (legacy)**: Display states (priority order): `working_N` (1-3 sessions) > `thinking` > `confused` > `idle` > `sleeping`. Intensity tiers: 1 session = Typing, 2 = Juggling, 3+ = Building.
 - **Session transitions**: New sessions walk in from offscreen. Exiting sessions play a burrowing animation, then remaining sessions reposition with walk animations. Extra sessions beyond `MAX_VISIBLE` are shown as a "+N" overflow badge.
-- **Special events**: `PreCompact` → per-session sweeping (v2) or global oneshot sweep (v1), `Notification` (idle_prompt) → confused
+- **Special events**: `PreCompact` → per-session sweeping (v2) or global oneshot sweep (v1), `Notification` (idle_prompt) → confused, `StopFailure` (API error) → error/dizzy with triple red LED flash
 - **Staleness eviction**: Sessions with no events within the configurable timeout (default 10min) are evicted. No sessions = sleeping.
 - **Subagent tracking**: `SubagentStart`/`SubagentStop` hooks track active `agent_id`s per session. Sessions with active subagents are never evicted and count as "working" in display state. HUD overlay shows mini-crab icon with subagent count.
 - **Session persistence**: Session state is saved atomically to `~/.clawd-tank/sessions.json` on structural state changes. Daemon loads saved state on startup with immediate stale session eviction, so restarting the menu bar app preserves the correct display state for running Claude Code sessions.
@@ -205,3 +205,82 @@ The daemon tracks per-session state and computes display state sent to the devic
 ## TODO Tracking
 
 Always check `TODO.md` at the start of a session to understand current project status. After completing any work, update `TODO.md` to reflect what was done — check off finished items, add progress notes to partial items, and add new items as they are discovered.
+
+<!-- gitnexus:start -->
+# GitNexus — Code Intelligence
+
+This project is indexed by GitNexus as **clawd-tank** (691145 symbols, 880928 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+
+> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
+
+## Always Do
+
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
+- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
+- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+
+## When Debugging
+
+1. `gitnexus_query({query: "<error or symptom>"})` — find execution flows related to the issue
+2. `gitnexus_context({name: "<suspect function>"})` — see all callers, callees, and process participation
+3. `READ gitnexus://repo/clawd-tank/process/{processName}` — trace the full execution flow step by step
+4. For regressions: `gitnexus_detect_changes({scope: "compare", base_ref: "main"})` — see what your branch changed
+
+## When Refactoring
+
+- **Renaming**: MUST use `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` first. Review the preview — graph edits are safe, text_search edits need manual review. Then run with `dry_run: false`.
+- **Extracting/Splitting**: MUST run `gitnexus_context({name: "target"})` to see all incoming/outgoing refs, then `gitnexus_impact({target: "target", direction: "upstream"})` to find all external callers before moving code.
+- After any refactor: run `gitnexus_detect_changes({scope: "all"})` to verify only expected files changed.
+
+## Never Do
+
+- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
+- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
+- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
+
+## Tools Quick Reference
+
+| Tool | When to use | Command |
+|------|-------------|---------|
+| `query` | Find code by concept | `gitnexus_query({query: "auth validation"})` |
+| `context` | 360-degree view of one symbol | `gitnexus_context({name: "validateUser"})` |
+| `impact` | Blast radius before editing | `gitnexus_impact({target: "X", direction: "upstream"})` |
+| `detect_changes` | Pre-commit scope check | `gitnexus_detect_changes({scope: "staged"})` |
+| `rename` | Safe multi-file rename | `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` |
+| `cypher` | Custom graph queries | `gitnexus_cypher({query: "MATCH ..."})` |
+
+## Impact Risk Levels
+
+| Depth | Meaning | Action |
+|-------|---------|--------|
+| d=1 | WILL BREAK — direct callers/importers | MUST update these |
+| d=2 | LIKELY AFFECTED — indirect deps | Should test |
+| d=3 | MAY NEED TESTING — transitive | Test if critical path |
+
+## Resources
+
+| Resource | Use for |
+|----------|---------|
+| `gitnexus://repo/clawd-tank/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/clawd-tank/clusters` | All functional areas |
+| `gitnexus://repo/clawd-tank/processes` | All execution flows |
+| `gitnexus://repo/clawd-tank/process/{name}` | Step-by-step execution trace |
+
+## Self-Check Before Finishing
+
+Before completing any code modification task, verify:
+1. `gitnexus_impact` was run for all modified symbols
+2. No HIGH/CRITICAL risk warnings were ignored
+3. `gitnexus_detect_changes()` confirms changes match expected scope
+4. All d=1 (WILL BREAK) dependents were updated
+
+## CLI
+
+- Re-index: `npx gitnexus analyze`
+- Check freshness: `npx gitnexus status`
+- Generate docs: `npx gitnexus wiki`
+
+<!-- gitnexus:end -->

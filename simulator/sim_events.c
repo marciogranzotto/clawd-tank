@@ -221,6 +221,7 @@ void sim_events_init_inline(const char *events_str)
                 else if (strcmp(anim_str, "sleeping") == 0) anim = CLAWD_ANIM_SLEEPING;
                 else if (strcmp(anim_str, "juggling") == 0) anim = CLAWD_ANIM_JUGGLING;
                 else if (strcmp(anim_str, "sweeping") == 0) anim = CLAWD_ANIM_SWEEPING;
+                else if (strcmp(anim_str, "dizzy") == 0) anim = CLAWD_ANIM_DIZZY;
 
                 if (anim < 0) {
                     fprintf(stderr, "[sim] Unknown session anim: %s\n", anim_str);

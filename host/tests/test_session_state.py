@@ -782,3 +782,81 @@ async def test_compact_sends_per_session_sweeping_v2():
     assert sweeping_payload is not None
     assert sweeping_payload["anims"][1] == "sweeping"  # bbb is second
     assert sweeping_payload["anims"][0] == "typing"    # aaa unchanged
+
+
+# --- Task 2: error state and dizzy display mapping ---
+
+
+def test_error_state_returns_dizzy():
+    d = make_daemon()
+    _add_session(d, "s1", {"state": "error", "last_event": time.time()})
+    assert d._compute_display_state() == {"anims": ["dizzy"], "ids": [1], "subagents": 0}
+
+
+@pytest.mark.asyncio
+async def test_stop_failure_add_sets_error():
+    d = make_daemon()
+    d._session_states["s1"] = {"state": "working", "last_event": time.time()}
+    await d._handle_message({
+        "event": "add", "hook": "StopFailure", "session_id": "s1",
+        "project": "proj", "message": "Rate limited",
+    })
+    assert d._session_states["s1"]["state"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_error_state_clears_on_prompt_submit():
+    d = make_daemon()
+    d._session_states["s1"] = {"state": "error", "last_event": time.time()}
+    await d._handle_message({"event": "dismiss", "hook": "UserPromptSubmit", "session_id": "s1"})
+    assert d._session_states["s1"]["state"] == "thinking"
+
+
+@pytest.mark.asyncio
+async def test_error_state_clears_on_tool_use():
+    d = make_daemon()
+    d._session_states["s1"] = {"state": "error", "last_event": time.time()}
+    await d._handle_message({"event": "tool_use", "session_id": "s1"})
+    assert d._session_states["s1"]["state"] == "working"
+
+
+@pytest.mark.asyncio
+async def test_error_state_removed_on_session_end():
+    d = make_daemon()
+    d._session_states["s1"] = {"state": "error", "last_event": time.time()}
+    await d._handle_message({"event": "dismiss", "hook": "SessionEnd", "session_id": "s1"})
+    assert "s1" not in d._session_states
+
+
+def test_error_state_evicted_on_staleness():
+    d = make_daemon()
+    d._session_staleness_timeout = 1
+    d._session_states["s1"] = {"state": "error", "last_event": time.time() - 9999}
+    d._evict_stale_sessions()
+    assert "s1" not in d._session_states
+
+
+@pytest.mark.asyncio
+async def test_stop_then_stop_failure_overwrites_to_error():
+    """Stop then StopFailure on same session — card overwrites, state becomes error."""
+    d = make_daemon()
+    d._session_states["s1"] = {"state": "working", "last_event": time.time()}
+    await d._handle_message({
+        "event": "add", "hook": "Stop", "session_id": "s1",
+        "project": "proj", "message": "Waiting",
+    })
+    assert d._session_states["s1"]["state"] == "idle"
+    await d._handle_message({
+        "event": "add", "hook": "StopFailure", "session_id": "s1",
+        "project": "proj", "message": "Rate limited",
+    })
+    assert d._session_states["s1"]["state"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_error_and_working_mixed():
+    d = make_daemon()
+    _add_session(d, "s1", {"state": "error", "last_event": time.time()})
+    _add_session(d, "s2", {"state": "working", "last_event": time.time()})
+    state = d._compute_display_state()
+    assert state["anims"] == ["dizzy", "typing"]

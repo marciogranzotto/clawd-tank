@@ -221,6 +221,8 @@ class ClawdDaemon:
                 anims.append("thinking")
             elif state["state"] == "confused":
                 anims.append("confused")
+            elif state["state"] == "error":
+                anims.append("dizzy")
             else:
                 anims.append("idle")
             ids.append(display_id)
@@ -261,6 +263,8 @@ class ClawdDaemon:
                 self._session_states[session_id]["state"] = "idle"
             elif hook == "Notification":
                 self._session_states[session_id]["state"] = "confused"
+            elif hook == "StopFailure":
+                self._session_states[session_id]["state"] = "error"
             self._session_states[session_id]["last_event"] = now
         elif event == "dismiss":
             if hook == "SessionEnd":

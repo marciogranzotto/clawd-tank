@@ -34,3 +34,14 @@ def test_save_creates_file_if_missing(prefs_file):
     assert result["ble_enabled"] is False
     loaded = load_preferences(prefs_file)
     assert loaded["sim_enabled"] == DEFAULTS["sim_enabled"]
+
+
+def test_int_preference_is_truthy(prefs_file):
+    """Preferences saved by rumps use int 0/1, not bool.
+    Code using prefs.get("key", True) must treat int 1 as truthy.
+    This documents the known behavior — see sim_socket.c cJSON fix."""
+    prefs_file.write_text(json.dumps({"sim_always_on_top": 1}))
+    result = load_preferences(prefs_file)
+    assert result["sim_always_on_top"]  # int 1 is truthy
+    assert result["sim_always_on_top"] == 1
+    assert result["sim_always_on_top"] is not True  # but it's int, not bool
