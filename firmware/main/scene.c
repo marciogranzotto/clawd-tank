@@ -180,7 +180,7 @@ static const anim_def_t anim_defs[] = {
         .looping = true,
         .width = DIZZY_WIDTH,
         .height = DIZZY_HEIGHT,
-        .y_offset = 12,   /* adjust after testing */
+        .y_offset = -8,
     },
     [CLAWD_ANIM_SWEEPING] = {
         .rle_data = sweeping_rle_data,
