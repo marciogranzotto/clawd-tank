@@ -910,6 +910,35 @@ bool scene_is_playing_oneshot(scene_t *scene)
     return slot->frame_idx < def->frame_count - 1;
 }
 
+/* ---------- Multi-session query ---------- */
+
+bool scene_is_multi_session(scene_t *scene)
+{
+    if (!scene) return false;
+    return scene->active_slot_count > 1;
+}
+
+/* Play a oneshot animation on slot 0 without destroying other slots.
+ * Used for notifications in multi-session mode where scene_set_clawd_anim()
+ * would incorrectly destroy slots 1+. */
+void scene_play_slot0_oneshot(scene_t *scene, clawd_anim_id_t anim)
+{
+    if (!scene) return;
+    clawd_slot_t *slot = &scene->slots[0];
+    if (!slot->active || !slot->sprite_img) return;
+
+    if (anim == slot->cur_anim) return;
+
+    slot->cur_anim = anim;
+    slot->frame_idx = 0;
+    slot->last_frame_tick = lv_tick_get();
+
+    const anim_def_t *def = &anim_defs[anim];
+    decode_and_apply_frame(slot);
+    lv_obj_set_size(slot->sprite_img, def->width, def->height);
+    lv_obj_align(slot->sprite_img, LV_ALIGN_BOTTOM_MID, slot->x_off, def->y_offset);
+}
+
 /* ---------- Multi-session positioning ---------- */
 
 static int find_id_in(const uint16_t *ids, int count, uint16_t target)

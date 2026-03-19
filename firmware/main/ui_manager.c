@@ -105,11 +105,16 @@ static void transition_to(ui_state_t new_state)
 
         scene_set_time_visible(s_scene, true);
 
-        /* Don't overwrite a oneshot animation (happy/alert) */
-        if (!scene_is_playing_oneshot(s_scene)) {
-            scene_set_clawd_anim(s_scene, status_to_anim(s_display_status));
+        if (!scene_is_multi_session(s_scene)) {
+            /* v1 single-session: set animation directly */
+            if (!scene_is_playing_oneshot(s_scene)) {
+                scene_set_clawd_anim(s_scene, status_to_anim(s_display_status));
+            }
+            scene_set_fallback_anim(s_scene, status_to_anim(s_display_status));
         }
-        scene_set_fallback_anim(s_scene, status_to_anim(s_display_status));
+        /* v2 multi-session: scene_set_width going-wide already unhides
+         * slots and starts walk animations. Per-session animations are
+         * managed by set_sessions — don't override them. */
 
         s_last_activity_tick = lv_tick_get();
         break;
@@ -120,7 +125,11 @@ static void transition_to(ui_state_t new_state)
         notification_ui_show(s_notif_ui, true, 300);
 
         scene_set_time_visible(s_scene, false);
-        scene_set_clawd_anim(s_scene, CLAWD_ANIM_ALERT);
+        if (scene_is_multi_session(s_scene)) {
+            scene_play_slot0_oneshot(s_scene, CLAWD_ANIM_ALERT);
+        } else {
+            scene_set_clawd_anim(s_scene, CLAWD_ANIM_ALERT);
+        }
 
         s_last_activity_tick = lv_tick_get();
         break;
@@ -205,8 +214,12 @@ void ui_manager_handle_event(const ble_evt_t *evt)
         if (s_state != UI_STATE_NOTIFICATION) {
             transition_to(UI_STATE_NOTIFICATION);
         } else {
-            /* Already in notification view — just play alert */
-            scene_set_clawd_anim(s_scene, CLAWD_ANIM_ALERT);
+            /* Already in notification view — just play alert on slot 0 */
+            if (scene_is_multi_session(s_scene)) {
+                scene_play_slot0_oneshot(s_scene, CLAWD_ANIM_ALERT);
+            } else {
+                scene_set_clawd_anim(s_scene, CLAWD_ANIM_ALERT);
+            }
         }
         s_last_activity_tick = lv_tick_get();
         break;

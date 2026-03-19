@@ -6,6 +6,7 @@
 
 ### Fixed
 
+- **Notification dismiss destroys multi-session clawds** — Entering or leaving notification view called `scene_set_clawd_anim()` (a v1 single-session function) which destroyed all slots beyond slot 0. Since the daemon only sends `set_sessions` on session state changes, the destroyed clawds were never recreated. Now uses `scene_play_slot0_oneshot()` for the alert animation and skips animation override on dismiss when multi-session is active.
 - **Narrow mode empty scenery** — When the notification panel was open and slot 0's session closed, the replacement sprite transferred from a hidden slot retained its hidden flag, leaving an empty scene. The narrow guard now unhides slot 0 and cancels any stale walk-in animation.
 - **Disconnect shows extra clawds** — Disconnecting with multiple active sessions left stale session clawds visible alongside the disconnected animation. `scene_set_clawd_anim` now deactivates all extra slots when switching to single-clawd mode.
 - **Main clawd goes away on connect** — Connecting with active sessions caused the disconnect clawd to play going-away while new session clawds walked in from offscreen. The disconnect clawd is now adopted as slot 0 and smoothly repositions.
