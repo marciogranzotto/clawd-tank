@@ -245,7 +245,11 @@ class ClawdDaemon:
             elif state["state"] == "error":
                 anims.append("dizzy")
             else:
-                anims.append("idle")
+                # Keep last working animation if notifications are showing
+                if self._active_notifications and state.get("tool_name"):
+                    anims.append(_tool_to_anim(state["tool_name"]))
+                else:
+                    anims.append("idle")
             ids.append(display_id)
 
         if not anims:
