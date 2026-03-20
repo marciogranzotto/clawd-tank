@@ -161,8 +161,15 @@ class ClawdDaemon:
         event = msg.get("event")
         session_id = msg.get("session_id", "")
         hook = msg.get("hook", "")
-        logger.info("Socket msg: event=%s hook=%s session=%s project=%s",
-                     event, hook, session_id[:12], msg.get("project", "?"))
+        extra = ""
+        if event == "tool_use":
+            extra = f" tool={msg.get('tool_name', '?')}"
+        elif event in ("subagent_start", "subagent_stop"):
+            extra = f" agent={msg.get('agent_id', '?')[:12]}"
+        elif event == "add":
+            extra = f" msg={msg.get('message', '')[:30]}"
+        logger.info("Socket msg: event=%s hook=%s session=%s%s",
+                     event, hook, session_id[:12], extra)
 
         if event == "add":
             self._active_notifications[session_id] = msg
@@ -372,6 +379,12 @@ class ClawdDaemon:
         if new_state == self._last_display_state:
             return
         self._last_display_state = new_state
+        if "anims" in new_state:
+            logger.info("Display: anims=%s subagents=%d%s",
+                        new_state["anims"], new_state.get("subagents", 0),
+                        f" overflow={new_state['overflow']}" if "overflow" in new_state else "")
+        else:
+            logger.info("Display: %s", new_state.get("status", "?"))
         for name, transport in self._transports.items():
             if transport.is_connected:
                 version = self._transport_versions.get(name, 1)
