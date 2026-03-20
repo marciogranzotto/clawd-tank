@@ -589,7 +589,7 @@ scene_t *scene_create(lv_obj_t *parent)
     lv_obj_align(s->hud_canvas, LV_ALIGN_TOP_LEFT, 4, 2);
     lv_obj_add_flag(s->hud_canvas, LV_OBJ_FLAG_HIDDEN);
 
-    /* HUD: overflow/total badge canvas (top-right of SCREEN, not container) */
+    /* HUD: overflow/total badge canvas (positioned at right edge of container) */
     s->hud_badge_canvas = lv_canvas_create(lv_screen_active());
     static uint8_t badge_buf[48 * 12 * 4];
     lv_canvas_set_buffer(s->hud_badge_canvas, badge_buf, 48, 12, LV_COLOR_FORMAT_ARGB8888);
@@ -1051,6 +1051,7 @@ static void scene_update_hud(scene_t *s, uint8_t subagent_count, uint8_t overflo
             snprintf(buf, sizeof(buf), "+%d", overflow);
         }
         pixel_font_draw(s->hud_badge_canvas, buf, 0, 1, 2, lv_color_hex(0x8BC6FC));
+        lv_obj_align_to(s->hud_badge_canvas, s->container, LV_ALIGN_TOP_RIGHT, -1, 4);
         lv_obj_clear_flag(s->hud_badge_canvas, LV_OBJ_FLAG_HIDDEN);
     } else {
         lv_obj_add_flag(s->hud_badge_canvas, LV_OBJ_FLAG_HIDDEN);
