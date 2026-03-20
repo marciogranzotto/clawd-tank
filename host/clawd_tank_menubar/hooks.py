@@ -40,7 +40,7 @@ NOTIFY_SCRIPT = textwrap.dedent('''\
             return {"event": "session_start", "session_id": session_id}
 
         if event_name == "PreToolUse":
-            return {"event": "tool_use", "session_id": session_id}
+            return {"event": "tool_use", "session_id": session_id, "tool_name": hook.get("tool_name", "")}
 
         if event_name == "PreCompact":
             return {"event": "compact", "session_id": session_id}
