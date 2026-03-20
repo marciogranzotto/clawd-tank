@@ -12,11 +12,14 @@ def hook_payload_to_daemon_message(hook: dict) -> Optional[dict]:
     """
     event_name = hook.get("hook_event_name", "")
     session_id = hook.get("session_id", "")
+    cwd = hook.get("cwd", "")
+    project = Path(cwd).name if cwd else ""
 
     if event_name == "SessionStart":
         return {
             "event": "session_start",
             "session_id": session_id,
+            "project": project,
         }
 
     if event_name == "PreToolUse":
@@ -24,6 +27,7 @@ def hook_payload_to_daemon_message(hook: dict) -> Optional[dict]:
             "event": "tool_use",
             "session_id": session_id,
             "tool_name": hook.get("tool_name", ""),
+            "project": project,
         }
 
     if event_name == "PreCompact":

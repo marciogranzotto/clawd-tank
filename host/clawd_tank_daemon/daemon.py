@@ -161,6 +161,14 @@ class ClawdDaemon:
         event = msg.get("event")
         session_id = msg.get("session_id", "")
         hook = msg.get("hook", "")
+        # Store project name on session if provided
+        project = msg.get("project", "")
+        if project and session_id and session_id in self._session_states:
+            self._session_states[session_id]["project"] = project
+        elif project and session_id:
+            # Will be stored after _update_session_state creates the entry
+            pass
+
         extra = ""
         if event == "tool_use":
             extra = f" tool={msg.get('tool_name', '?')}"
@@ -168,8 +176,15 @@ class ClawdDaemon:
             extra = f" agent={msg.get('agent_id', '?')[:12]}"
         elif event == "add":
             extra = f" msg={msg.get('message', '')[:30]}"
-        logger.info("Socket msg: event=%s hook=%s session=%s%s",
-                     event, hook, session_id[:12], extra)
+        session_project = ""
+        if session_id:
+            s = self._session_states.get(session_id)
+            if s and s.get("project"):
+                session_project = f" [{s['project']}]"
+            elif project:
+                session_project = f" [{project}]"
+        logger.info("Socket msg: event=%s hook=%s session=%s%s%s",
+                     event, hook, session_id[:12], session_project, extra)
 
         if event == "add":
             self._active_notifications[session_id] = msg
@@ -177,6 +192,10 @@ class ClawdDaemon:
             self._active_notifications.pop(session_id, None)
 
         changed = self._update_session_state(event, hook, session_id, msg.get("agent_id", ""), msg.get("tool_name", ""))
+
+        # Store project name after session state is created
+        if project and session_id and session_id in self._session_states:
+            self._session_states[session_id]["project"] = project
 
         # --- Handle compact: send sweeping oneshot ---
         if event == "compact":

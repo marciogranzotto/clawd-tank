@@ -35,12 +35,14 @@ NOTIFY_SCRIPT = textwrap.dedent('''\
         """Convert a Claude Code hook payload to a daemon message."""
         event_name = hook.get("hook_event_name", "")
         session_id = hook.get("session_id", "")
+        cwd = hook.get("cwd", "")
+        project = Path(cwd).name if cwd else ""
 
         if event_name == "SessionStart":
-            return {"event": "session_start", "session_id": session_id}
+            return {"event": "session_start", "session_id": session_id, "project": project}
 
         if event_name == "PreToolUse":
-            return {"event": "tool_use", "session_id": session_id, "tool_name": hook.get("tool_name", "")}
+            return {"event": "tool_use", "session_id": session_id, "tool_name": hook.get("tool_name", ""), "project": project}
 
         if event_name == "PreCompact":
             return {"event": "compact", "session_id": session_id}
