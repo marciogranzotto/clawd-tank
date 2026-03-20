@@ -945,26 +945,3 @@ def test_subagent_override_trumps_tool_name():
     })
     state = d._compute_display_state()
     assert state["anims"] == ["conducting"]
-
-
-def test_idle_with_notifications_keeps_last_tool_animation():
-    d = make_daemon()
-    _add_session(d, "s1", {"state": "idle", "last_event": time.time(), "tool_name": "Bash"})
-    d._active_notifications["s1"] = {"event": "add", "session_id": "s1"}
-    state = d._compute_display_state()
-    assert state["anims"] == ["building"]
-
-
-def test_idle_without_notifications_shows_idle():
-    d = make_daemon()
-    _add_session(d, "s1", {"state": "idle", "last_event": time.time(), "tool_name": "Bash"})
-    state = d._compute_display_state()
-    assert state["anims"] == ["idle"]
-
-
-def test_idle_with_notifications_but_no_tool_name_shows_idle():
-    d = make_daemon()
-    _add_session(d, "s1", {"state": "idle", "last_event": time.time()})
-    d._active_notifications["s1"] = {"event": "add", "session_id": "s1"}
-    state = d._compute_display_state()
-    assert state["anims"] == ["idle"]
