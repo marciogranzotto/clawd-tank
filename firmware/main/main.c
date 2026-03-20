@@ -9,6 +9,7 @@
 #include "ble_service.h"
 #include "ui_manager.h"
 #include "config_store.h"
+#include "button.h"
 #include "esp_heap_caps.h"
 
 static const char *TAG = "clawd-tank";
@@ -55,6 +56,9 @@ void app_main(void) {
 
     // Init BLE (NimBLE GATT server, posts events to queue)
     ble_service_init(s_evt_queue);
+
+    // Init BOOT button (GPIO 0) — clears notifications on press
+    button_init(s_evt_queue);
 
     // Start UI task
     BaseType_t ret = xTaskCreate(ui_task, "ui_task", 8192, NULL, 5, NULL);
