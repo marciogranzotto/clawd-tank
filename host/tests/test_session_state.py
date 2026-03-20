@@ -309,7 +309,7 @@ def test_staleness_keeps_sessions_with_active_subagents():
     assert "s1" in d._session_states  # NOT evicted — still fresh
 
 
-def test_idle_session_with_subagents_counts_as_building():
+def test_idle_session_with_subagents_counts_as_conducting():
     d = make_daemon()
     _add_session(d, "s1", {
         "state": "idle",
@@ -317,7 +317,7 @@ def test_idle_session_with_subagents_counts_as_building():
         "subagents": {"a1"},
     })
     state = d._compute_display_state()
-    assert state["anims"] == ["building"]
+    assert state["anims"] == ["conducting"]
     assert state["subagents"] == 1
 
 
@@ -330,7 +330,7 @@ def test_multiple_sessions_with_subagents():
         "state": "working", "last_event": time.time(),
     })
     state = d._compute_display_state()
-    assert state["anims"] == ["building", "typing"]
+    assert state["anims"] == ["conducting", "typing"]
     assert state["subagents"] == 1
 
 
@@ -370,13 +370,13 @@ async def test_duplicate_subagent_start_is_idempotent():
     assert d._session_states["s1"]["subagents"] == {"a1"}
 
 def test_working_session_with_subagents_counts_once():
-    """A session that is both state=working AND has subagents shows building."""
+    """A session that is both state=working AND has subagents shows conducting."""
     d = make_daemon()
     _add_session(d, "s1", {
         "state": "working", "last_event": time.time(), "subagents": {"a1"},
     })
     state = d._compute_display_state()
-    assert state["anims"] == ["building"]
+    assert state["anims"] == ["conducting"]
     assert state["subagents"] == 1
 
 @pytest.mark.asyncio
@@ -393,14 +393,14 @@ async def test_subagent_lifecycle():
     await d._handle_message({"event": "tool_use", "session_id": "s1"})
     assert d._compute_display_state() == {"anims": ["typing"], "ids": [1], "subagents": 0}
 
-    # Subagent spawned — session becomes building
+    # Subagent spawned — session becomes conducting
     await d._handle_message({"event": "subagent_start", "session_id": "s1", "agent_id": "a1"})
     state = d._compute_display_state()
-    assert state["anims"] == ["building"]
+    assert state["anims"] == ["conducting"]
     assert state["subagents"] == 1
     assert "a1" in d._session_states["s1"]["subagents"]
 
-    # Stop fires — session state goes idle, but subagent keeps it building
+    # Stop fires — session state goes idle, but subagent keeps it conducting
     await d._handle_message({
         "event": "add", "hook": "Stop", "session_id": "s1",
         "project": "proj", "message": "Waiting",
@@ -408,7 +408,7 @@ async def test_subagent_lifecycle():
     assert d._session_states["s1"]["state"] == "idle"
     assert "a1" in d._session_states["s1"]["subagents"]
     state = d._compute_display_state()
-    assert state["anims"] == ["building"]
+    assert state["anims"] == ["conducting"]
 
     # Subagent finishes via SubagentStop
     await d._handle_message({"event": "subagent_stop", "session_id": "s1", "agent_id": "a1"})
@@ -618,13 +618,13 @@ async def test_display_state_single_session_typing():
 
 
 @pytest.mark.asyncio
-async def test_display_state_working_with_subagents_becomes_building():
+async def test_display_state_working_with_subagents_becomes_conducting():
     d = make_daemon()
     await d._handle_message({"event": "session_start", "session_id": "aaa"})
     await d._handle_message({"event": "tool_use", "session_id": "aaa"})
     await d._handle_message({"event": "subagent_start", "session_id": "aaa", "agent_id": "sub1"})
     state = d._compute_display_state()
-    assert state["anims"] == ["building"]
+    assert state["anims"] == ["conducting"]
     assert state["subagents"] == 1
 
 
@@ -860,3 +860,88 @@ async def test_error_and_working_mixed():
     _add_session(d, "s2", {"state": "working", "last_event": time.time()})
     state = d._compute_display_state()
     assert state["anims"] == ["dizzy", "typing"]
+
+
+# --- Task 2: Tool-aware animation mapping ---
+
+
+def test_working_with_bash_tool_returns_building():
+    d = make_daemon()
+    _add_session(d, "s1", {"state": "working", "last_event": time.time(), "tool_name": "Bash"})
+    state = d._compute_display_state()
+    assert state["anims"] == ["building"]
+
+
+def test_working_with_read_tool_returns_debugger():
+    d = make_daemon()
+    _add_session(d, "s1", {"state": "working", "last_event": time.time(), "tool_name": "Read"})
+    state = d._compute_display_state()
+    assert state["anims"] == ["debugger"]
+
+
+def test_working_with_grep_tool_returns_debugger():
+    d = make_daemon()
+    _add_session(d, "s1", {"state": "working", "last_event": time.time(), "tool_name": "Grep"})
+    state = d._compute_display_state()
+    assert state["anims"] == ["debugger"]
+
+
+def test_working_with_edit_tool_returns_typing():
+    d = make_daemon()
+    _add_session(d, "s1", {"state": "working", "last_event": time.time(), "tool_name": "Edit"})
+    state = d._compute_display_state()
+    assert state["anims"] == ["typing"]
+
+
+def test_working_with_websearch_returns_wizard():
+    d = make_daemon()
+    _add_session(d, "s1", {"state": "working", "last_event": time.time(), "tool_name": "WebSearch"})
+    state = d._compute_display_state()
+    assert state["anims"] == ["wizard"]
+
+
+def test_working_with_agent_returns_conducting():
+    d = make_daemon()
+    _add_session(d, "s1", {"state": "working", "last_event": time.time(), "tool_name": "Agent"})
+    state = d._compute_display_state()
+    assert state["anims"] == ["conducting"]
+
+
+def test_working_with_lsp_returns_beacon():
+    d = make_daemon()
+    _add_session(d, "s1", {"state": "working", "last_event": time.time(), "tool_name": "LSP"})
+    state = d._compute_display_state()
+    assert state["anims"] == ["beacon"]
+
+
+def test_working_with_mcp_tool_returns_beacon():
+    d = make_daemon()
+    _add_session(d, "s1", {"state": "working", "last_event": time.time(), "tool_name": "mcp__firebase__list_projects"})
+    state = d._compute_display_state()
+    assert state["anims"] == ["beacon"]
+
+
+def test_working_with_unknown_tool_returns_typing():
+    d = make_daemon()
+    _add_session(d, "s1", {"state": "working", "last_event": time.time(), "tool_name": "SomeFutureTool"})
+    state = d._compute_display_state()
+    assert state["anims"] == ["typing"]
+
+
+def test_working_no_tool_name_returns_typing():
+    d = make_daemon()
+    _add_session(d, "s1", {"state": "working", "last_event": time.time()})
+    state = d._compute_display_state()
+    assert state["anims"] == ["typing"]
+
+
+def test_subagent_override_trumps_tool_name():
+    d = make_daemon()
+    _add_session(d, "s1", {
+        "state": "working",
+        "last_event": time.time(),
+        "tool_name": "Read",
+        "subagents": {"agent-1"},
+    })
+    state = d._compute_display_state()
+    assert state["anims"] == ["conducting"]

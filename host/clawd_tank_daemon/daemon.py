@@ -21,6 +21,27 @@ from .session_store import save_sessions, load_sessions
 
 logger = logging.getLogger("clawd-tank")
 
+TOOL_ANIMATION_MAP = {
+    "Edit": "typing",
+    "Write": "typing",
+    "NotebookEdit": "typing",
+    "Read": "debugger",
+    "Grep": "debugger",
+    "Glob": "debugger",
+    "Bash": "building",
+    "Agent": "conducting",
+    "WebSearch": "wizard",
+    "WebFetch": "wizard",
+    "LSP": "beacon",
+}
+
+
+def _tool_to_anim(tool_name: str) -> str:
+    if tool_name and tool_name.startswith("mcp__"):
+        return "beacon"
+    return TOOL_ANIMATION_MAP.get(tool_name, "typing")
+
+
 PID_PATH = Path.home() / ".clawd-tank" / "daemon.pid"
 LOCK_PATH = Path.home() / ".clawd-tank" / "daemon.lock"
 
@@ -148,7 +169,7 @@ class ClawdDaemon:
         elif event == "dismiss":
             self._active_notifications.pop(session_id, None)
 
-        changed = self._update_session_state(event, hook, session_id, msg.get("agent_id", ""))
+        changed = self._update_session_state(event, hook, session_id, msg.get("agent_id", ""), msg.get("tool_name", ""))
 
         # --- Handle compact: send sweeping oneshot ---
         if event == "compact":
@@ -214,9 +235,9 @@ class ClawdDaemon:
 
             if state["state"] == "working" or session_subagents:
                 if session_subagents:
-                    anims.append("building")
+                    anims.append("conducting")
                 else:
-                    anims.append("typing")
+                    anims.append(_tool_to_anim(state.get("tool_name", "")))
             elif state["state"] == "thinking":
                 anims.append("thinking")
             elif state["state"] == "confused":
@@ -235,7 +256,7 @@ class ClawdDaemon:
             result["overflow"] = len(self._session_order) - 4
         return result
 
-    def _update_session_state(self, event: str, hook: str, session_id: str, agent_id: str = "") -> bool:
+    def _update_session_state(self, event: str, hook: str, session_id: str, agent_id: str = "", tool_name: str = "") -> bool:
         """Update per-session state based on a received event.
 
         Returns True if session state or subagents changed structurally
@@ -253,6 +274,7 @@ class ClawdDaemon:
         elif event == "tool_use":
             self._session_states.setdefault(session_id, {"state": "working", "last_event": now})
             self._session_states[session_id]["state"] = "working"
+            self._session_states[session_id]["tool_name"] = tool_name
             self._session_states[session_id]["last_event"] = now
         elif event == "compact":
             if session_id in self._session_states:
