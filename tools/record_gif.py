@@ -25,13 +25,15 @@ except ImportError:
     print("Error: Pillow is required. Install with: pip install Pillow", file=sys.stderr)
     sys.exit(1)
 
-# Status names accepted by --capture-anim (must match display_status_t values)
+# Animation names accepted by --capture-anim
+# V1 status names use STATUS_MAP, v2 names pass through directly
 ANIMATIONS = [
     "idle", "sleeping",
     "thinking", "typing", "juggling", "building", "confused", "sweeping",
+    "debugger", "wizard", "conducting", "beacon",
 ]
 
-# Map friendly names to set_status values (typing/juggling/building are intensity tiers)
+# Map friendly names to set_status values (v1 intensity tiers)
 STATUS_MAP = {
     "typing": "working_1",
     "juggling": "working_2",

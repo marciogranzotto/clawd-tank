@@ -228,7 +228,7 @@ static const anim_def_t anim_defs[] = {
         .looping = true,
         .width = DEBUGGER_WIDTH,
         .height = DEBUGGER_HEIGHT,
-        .y_offset = 7,   /* -8 + 15 (crop adjustment) */
+        .y_offset = -8,
     },
     [CLAWD_ANIM_WIZARD] = {
         .rle_data = wizard_rle_data,
@@ -238,7 +238,7 @@ static const anim_def_t anim_defs[] = {
         .looping = true,
         .width = WIZARD_WIDTH,
         .height = WIZARD_HEIGHT,
-        .y_offset = 8,   /* -8 + 16 (crop adjustment) */
+        .y_offset = -8,
     },
     [CLAWD_ANIM_CONDUCTING] = {
         .rle_data = conducting_rle_data,
@@ -248,7 +248,7 @@ static const anim_def_t anim_defs[] = {
         .looping = true,
         .width = CONDUCTING_WIDTH,
         .height = CONDUCTING_HEIGHT,
-        .y_offset = 6,   /* -8 + 14 (crop adjustment) */
+        .y_offset = -8,
     },
     [CLAWD_ANIM_BEACON] = {
         .rle_data = beacon_rle_data,
@@ -258,7 +258,7 @@ static const anim_def_t anim_defs[] = {
         .looping = true,
         .width = BEACON_WIDTH,
         .height = BEACON_HEIGHT,
-        .y_offset = -8,   /* no crop adjustment */
+        .y_offset = 4,
     },
     [CLAWD_ANIM_MINI_CLAWD] = {
         .rle_data = mini_crab_rle_data,

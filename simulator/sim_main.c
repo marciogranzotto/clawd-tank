@@ -216,21 +216,51 @@ static int parse_status_name(const char *name) {
     return -1;
 }
 
+/* Try parsing as a v2 animation name (debugger, wizard, etc.) */
+static int parse_v2_anim_name(const char *name) {
+    if (strcmp(name, "debugger") == 0)   return CLAWD_ANIM_DEBUGGER;
+    if (strcmp(name, "wizard") == 0)     return CLAWD_ANIM_WIZARD;
+    if (strcmp(name, "conducting") == 0) return CLAWD_ANIM_CONDUCTING;
+    if (strcmp(name, "beacon") == 0)     return CLAWD_ANIM_BEACON;
+    /* Also support existing v2-capable anim names */
+    if (strcmp(name, "typing") == 0)     return CLAWD_ANIM_TYPING;
+    if (strcmp(name, "thinking") == 0)   return CLAWD_ANIM_THINKING;
+    if (strcmp(name, "building") == 0)   return CLAWD_ANIM_BUILDING;
+    if (strcmp(name, "confused") == 0)   return CLAWD_ANIM_CONFUSED;
+    if (strcmp(name, "dizzy") == 0)      return CLAWD_ANIM_DIZZY;
+    if (strcmp(name, "idle") == 0)       return CLAWD_ANIM_IDLE;
+    return -1;
+}
+
 static void run_capture_anim(void)
 {
+    int v2_anim = parse_v2_anim_name(opt_capture_anim);
     int status = parse_status_name(opt_capture_anim);
-    if (status < 0) {
-        fprintf(stderr, "Unknown status: %s\n", opt_capture_anim);
+
+    if (v2_anim < 0 && status < 0) {
+        fprintf(stderr, "Unknown animation: %s\n", opt_capture_anim);
         return;
     }
 
     sim_screenshot_init(opt_capture_dir);
 
-    /* Connect and set the status */
+    /* Connect */
     ble_evt_t connect_evt = { .type = BLE_EVT_CONNECTED };
     ui_manager_handle_event(&connect_evt);
 
-    ble_evt_t status_evt = { .type = BLE_EVT_SET_STATUS, .status = (uint8_t)status };
+    /* Use v2 set_sessions for animation names, v1 set_status for status names */
+    ble_evt_t status_evt;
+    if (v2_anim >= 0) {
+        status_evt.type = BLE_EVT_SET_SESSIONS;
+        status_evt.session_anim_count = 1;
+        status_evt.session_anims[0] = (uint8_t)v2_anim;
+        status_evt.session_ids[0] = 1;
+        status_evt.subagent_count = 0;
+        status_evt.session_overflow = 0;
+    } else {
+        status_evt.type = BLE_EVT_SET_STATUS;
+        status_evt.status = (uint8_t)status;
+    }
     ui_manager_handle_event(&status_evt);
 
     /* Advance past the HAPPY oneshot (fires on connect) so the target
