@@ -14,7 +14,7 @@ if(STATIC_SDL2)
     set(SDL2_DISABLE_SDL2MAIN ON CACHE BOOL "" FORCE)
     FetchContent_Declare(
         SDL2
-        URL https://github.com/libsdl-org/SDL/releases/download/release-2.30.10/SDL2-2.30.10.tar.gz
+        URL ${CMAKE_SOURCE_DIR}/SDL2-2.30.10.tar.gz
         URL_HASH SHA256=f59adf36a0fcf4c94198e7d3d776c1b3824211ab7aeebeb31fe19836661196aa
     )
     FetchContent_MakeAvailable(SDL2)
@@ -31,6 +31,7 @@ set(LVGL_DIR ${CMAKE_SOURCE_DIR}/../firmware/managed_components/lvgl__lvgl)
 # Build LVGL as a subdirectory — it detects non-ESP and uses os_desktop.cmake
 # Point it to our lv_conf.h via LV_BUILD_CONF_DIR
 set(LV_BUILD_CONF_DIR ${CMAKE_SOURCE_DIR} CACHE PATH "" FORCE)
+set(LV_CONF_PATH ${CMAKE_SOURCE_DIR}/lv_conf.h CACHE PATH "" FORCE)
 set(CONFIG_LV_BUILD_DEMOS OFF CACHE BOOL "" FORCE)
 set(CONFIG_LV_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(CONFIG_LV_USE_THORVG_INTERNAL OFF CACHE BOOL "" FORCE)
@@ -72,6 +73,17 @@ target_include_directories(clawd-tank-sim PRIVATE
 
 target_compile_definitions(clawd-tank-sim PRIVATE SIMULATOR)
 
+# Windows compatibility
+if(WIN32)
+    target_compile_definitions(clawd-tank-sim PRIVATE
+        _CRT_SECURE_NO_WARNINGS
+        SDL_MAIN_HANDLED
+    )
+    target_compile_options(clawd-tank-sim PRIVATE
+        -include ${CMAKE_SOURCE_DIR}/shims/win_compat.h
+    )
+endif()
+
 target_link_libraries(clawd-tank-sim PRIVATE
     lvgl
     ${SDL2_TARGET}
@@ -89,5 +101,13 @@ if(APPLE)
         "-framework AudioToolbox"
         "-framework GameController"
         "-framework CoreHaptics"
+    )
+elseif(WIN32)
+    target_link_libraries(clawd-tank-sim PRIVATE
+        ws2_32
+        winmm
+        imm32
+        setupapi
+        version
     )
 endif()
