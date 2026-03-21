@@ -5,8 +5,25 @@
 #include "scene.h"
 #include <stdio.h>
 #include <string.h>
-#include <sys/time.h>
 #include <stdlib.h>
+#include <time.h>
+
+#ifdef _WIN32
+#include <windows.h>
+/* Windows doesn't have settimeofday — stub it (simulator doesn't need real time sync) */
+static inline void settimeofday_stub(time_t epoch) {
+    (void)epoch;
+    /* no-op on Windows simulator */
+}
+static inline void setenv_tz(const char *tz) {
+    char buf[128];
+    snprintf(buf, sizeof(buf), "TZ=%s", tz);
+    _putenv(buf);
+    _tzset();
+}
+#else
+#include <sys/time.h>
+#endif
 
 static int parse_anim_name(const char *str) {
     if (strcmp(str, "idle") == 0)     return CLAWD_ANIM_IDLE;
@@ -78,14 +95,22 @@ int sim_ble_parse_json(const char *buf, uint16_t len, ble_evt_t *out) {
     } else if (strcmp(action->valuestring, "set_time") == 0) {
         cJSON *epoch = cJSON_GetObjectItem(json, "epoch");
         if (epoch && cJSON_IsNumber(epoch)) {
+#ifdef _WIN32
+            settimeofday_stub((time_t)epoch->valuedouble);
+#else
             struct timeval tv = { .tv_sec = (time_t)epoch->valuedouble, .tv_usec = 0 };
             settimeofday(&tv, NULL);
-            printf("[tcp] System time set to epoch %lld\n", (long long)tv.tv_sec);
+#endif
+            printf("[tcp] System time set to epoch %lld\n", (long long)(time_t)epoch->valuedouble);
         }
         cJSON *tz = cJSON_GetObjectItem(json, "tz");
         if (tz && cJSON_IsString(tz)) {
+#ifdef _WIN32
+            setenv_tz(tz->valuestring);
+#else
             setenv("TZ", tz->valuestring, 1);
             tzset();
+#endif
             printf("[tcp] Timezone set to %s\n", tz->valuestring);
         }
         cJSON_Delete(json);
