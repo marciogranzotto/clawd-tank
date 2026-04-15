@@ -253,21 +253,6 @@ class ClawdDaemon:
             len(s.get("subagents", set())) for s in self._session_states.values()
         )
 
-        # Find the most recent working session's tool animation (for idle
-        # sessions to mirror when notifications are showing in narrow view)
-        working_anim = None
-        if self._active_notifications:
-            most_recent_working = None
-            for s in self._session_states.values():
-                if s["state"] == "working" or s.get("subagents"):
-                    if most_recent_working is None or s["last_event"] > most_recent_working["last_event"]:
-                        most_recent_working = s
-            if most_recent_working is not None:
-                if most_recent_working.get("subagents"):
-                    working_anim = "conducting"
-                else:
-                    working_anim = _tool_to_anim(most_recent_working.get("tool_name", ""))
-
         for session_id, display_id in self._session_order[:4]:
             state = self._session_states.get(session_id)
             if state is None:
@@ -282,14 +267,9 @@ class ClawdDaemon:
             elif state["state"] == "thinking":
                 anims.append("thinking")
             elif state["state"] == "confused":
-                if working_anim:
-                    anims.append(working_anim)
-                else:
-                    anims.append("confused")
+                anims.append("confused")
             elif state["state"] == "error":
                 anims.append("dizzy")
-            elif working_anim:
-                anims.append(working_anim)
             else:
                 anims.append("idle")
             ids.append(display_id)

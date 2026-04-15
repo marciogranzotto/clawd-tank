@@ -947,25 +947,25 @@ def test_subagent_override_trumps_tool_name():
     assert state["anims"] == ["conducting"]
 
 
-def test_idle_session_mirrors_working_session_anim_when_notifications_active():
-    """Idle sessions show the most recent working session's animation in narrow view."""
+def test_idle_session_keeps_own_anim_when_notifications_active():
+    """Idle sessions keep their own animation even when notifications are present."""
     d = make_daemon()
     _add_session(d, "s1", {"state": "idle", "last_event": time.time()})
     _add_session(d, "s2", {"state": "working", "last_event": time.time(), "tool_name": "Read"})
     d._active_notifications["s1"] = {"event": "add", "session_id": "s1"}
     state = d._compute_display_state()
-    assert state["anims"] == ["debugger", "debugger"]
+    assert state["anims"] == ["idle", "debugger"]
 
 
-def test_idle_session_mirrors_most_recent_working_session():
-    """When multiple working sessions, idle mirrors the most recent one."""
+def test_idle_session_stays_idle_with_multiple_working_sessions():
+    """Idle sessions stay idle regardless of working sessions and notifications."""
     d = make_daemon()
     _add_session(d, "s1", {"state": "idle", "last_event": time.time()})
     _add_session(d, "s2", {"state": "working", "last_event": time.time() - 10, "tool_name": "Read"})
     _add_session(d, "s3", {"state": "working", "last_event": time.time(), "tool_name": "Bash"})
     d._active_notifications["s1"] = {"event": "add", "session_id": "s1"}
     state = d._compute_display_state()
-    assert state["anims"][0] == "building"  # s1 mirrors s3 (most recent)
+    assert state["anims"][0] == "idle"  # s1 keeps its own idle animation
 
 
 def test_idle_stays_idle_when_no_working_sessions():
