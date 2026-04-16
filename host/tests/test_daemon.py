@@ -239,13 +239,13 @@ async def test_ble_write_failure_triggers_reconnect_and_replay():
     mock_transport.is_connected = True
     daemon._transports["ble"] = mock_transport
 
-    # First write is sync_time (succeeds), second fails, rest succeed
-    write_results = [True, False, True, True]
+    # Initial _post_connect_sync writes: set_time, replay s1, set_status (3 writes).
+    # Write 4 is the queued s2 — we make it fail to exercise the reconnect branch.
     write_calls = []
 
     async def mock_write(payload):
         write_calls.append(payload)
-        return write_results.pop(0) if write_results else True
+        return len(write_calls) != 4  # fail the 4th write
 
     mock_transport.write_notification = mock_write
     mock_transport.ensure_connected = AsyncMock()
@@ -273,6 +273,12 @@ async def test_ble_write_failure_triggers_reconnect_and_replay():
     assert mock_transport.ensure_connected.call_count >= 2
     # write_notification called: once for the failing write, once for replay of s1
     assert len(write_calls) >= 2
+    # After the failed write, post-connect sync must have re-sent set_time —
+    # otherwise the board keeps stale time across reconnects (e.g. after Mac sleep).
+    set_time_count = sum(
+        1 for p in write_calls if json.loads(p).get("action") == "set_time"
+    )
+    assert set_time_count >= 2, f"expected >=2 set_time payloads, got {set_time_count}"
 
 
 @pytest.mark.asyncio
@@ -321,6 +327,71 @@ async def test_ble_write_failure_replays_multiple_active():
     replayed_ids = {json.loads(p).get("id") for p in write_calls[5:] if json.loads(p).get("id")}
     assert "s1" in replayed_ids
     assert "s2" in replayed_ids
+
+
+# --- Manual reconnect ---
+
+@pytest.mark.asyncio
+async def test_reconnect_forces_disconnect_and_resyncs_time():
+    """Daemon.reconnect() (menu bar button) must force a fresh link and re-send set_time.
+
+    Regression: on macOS sleep/wake the bleak is_connected property stays stale-True,
+    so a plain ensure_connected() does nothing. The Reconnect button has to actively
+    drop the client and then run _post_connect_sync so the board's clock catches up.
+    """
+    daemon = ClawdDaemon()
+    mock_transport = AsyncMock()
+    mock_transport.is_connected = True
+    write_calls = []
+
+    async def mock_write(payload):
+        write_calls.append(payload)
+        return True
+
+    mock_transport.write_notification = mock_write
+    mock_transport.disconnect = AsyncMock()
+    mock_transport.ensure_connected = AsyncMock()
+    daemon._transports["ble"] = mock_transport
+
+    await daemon.reconnect()
+
+    assert mock_transport.disconnect.await_count == 1
+    assert mock_transport.ensure_connected.await_count == 1
+    actions = [json.loads(p).get("action") for p in write_calls]
+    assert "set_time" in actions
+
+
+@pytest.mark.asyncio
+async def test_reconnect_continues_when_one_transport_fails():
+    """A failing disconnect/connect on one transport must not block the others."""
+    daemon = ClawdDaemon(sim_port=19872)
+    ble = AsyncMock()
+    ble.is_connected = True
+    ble.disconnect = AsyncMock(side_effect=RuntimeError("boom"))
+    ble.ensure_connected = AsyncMock(side_effect=RuntimeError("still broken"))
+    ble.write_notification = AsyncMock(return_value=True)
+
+    sim_calls = []
+
+    async def sim_write(payload):
+        sim_calls.append(payload)
+        return True
+
+    sim = AsyncMock()
+    sim.is_connected = True
+    sim.disconnect = AsyncMock()
+    sim.ensure_connected = AsyncMock()
+    sim.write_notification = sim_write
+
+    daemon._transports["ble"] = ble
+    daemon._transports["sim"] = sim
+
+    await daemon.reconnect()
+
+    # sim transport still got its full resync despite ble blowing up
+    assert sim.disconnect.await_count == 1
+    assert sim.ensure_connected.await_count == 1
+    assert any(json.loads(p).get("action") == "set_time" for p in sim_calls)
 
 
 # --- Multi-transport ---

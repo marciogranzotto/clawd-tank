@@ -31,6 +31,8 @@ class ClawdBleClient:
     async def connect(self) -> None:
         """Scan for and connect to the Clawd Tank device. Retries until found."""
         self._loop = asyncio.get_running_loop()
+        if self._client is not None:
+            await self.disconnect()
         while True:
             logger.info("Scanning for Clawd Tank device...")
             device = await BleakScanner.find_device_by_name(
@@ -72,6 +74,18 @@ class ClawdBleClient:
     def _clear_client(self) -> None:
         self._client = None
 
+    async def _handle_disconnect(self) -> None:
+        """Force-drop the bleak client after an op failure and notify."""
+        client = self._client
+        self._client = None
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+        if self._on_disconnect_cb:
+            self._on_disconnect_cb()
+
     async def ensure_connected(self) -> None:
         """Reconnect if disconnected."""
         if not self.is_connected:
@@ -95,6 +109,7 @@ class ClawdBleClient:
                 return True
             except Exception as e:
                 logger.error("BLE write failed: %s", e)
+                await self._handle_disconnect()
                 return False
 
     async def read_config(self) -> dict:
@@ -111,15 +126,21 @@ class ClawdBleClient:
                 return json.loads(data.decode("utf-8"))
             except Exception as e:
                 logger.error("Config read failed: %s", e)
+                await self._handle_disconnect()
                 return {}
 
     async def read_version(self) -> int:
         """Read protocol version from firmware. Returns 1 if characteristic absent."""
+        if not self.is_connected:
+            return 1
         try:
             data = await self._client.read_gatt_char(VERSION_CHR_UUID)
             return int(data.decode("utf-8").strip())
+        except ValueError:
+            return 1  # payload wasn't a number — firmware speaks v1
         except Exception:
-            return 1  # v1 firmware or characteristic not found
+            await self._handle_disconnect()
+            return 1
 
     async def write_config(self, payload: str) -> bool:
         """Write a partial config JSON to the config characteristic.
@@ -139,6 +160,7 @@ class ClawdBleClient:
                 return True
             except Exception as e:
                 logger.error("Config write failed: %s", e)
+                await self._handle_disconnect()
                 return False
 
     async def disconnect(self) -> None:

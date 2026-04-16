@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-04-16
+
+### Fixed
+
+- **Stale board clock after Mac sleep / manual Reconnect** — On macOS sleep, the BLE link silently dropped but bleak's `is_connected` stayed `True`, so the daemon never re-ran its post-connect sync and `set_time` was never re-sent. The menu bar **Reconnect** button had the same issue because it called `ensure_connected()` without first forcing a disconnect or running the post-connect sync. Fixed by: BLE client now clears its bleak client on any failed GATT op (mirrors the simulator TCP transport); `connect()` drops any existing client before scanning; the write-failure path always runs the full post-connect sync on reconnect; and `Daemon.reconnect()` force-disconnects each transport before reconnecting and always re-syncs time + state.
+
 ## [1.4.0] - 2026-03-20
 
 ### Added

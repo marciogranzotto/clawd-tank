@@ -504,12 +504,9 @@ class ClawdDaemon:
             success = await transport.write_notification(payload)
 
             if not success:
-                was_connected = transport.is_connected
                 await transport.ensure_connected()
-                if not was_connected and transport.is_connected:
+                if transport.is_connected:
                     await self._post_connect_sync(transport, name)
-                else:
-                    await self._replay_active_for(transport, name)
 
     def _write_pid(self) -> None:
         PID_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -593,9 +590,18 @@ class ClawdDaemon:
         return success
 
     async def reconnect(self) -> None:
-        """Force reconnect on all transports."""
-        for transport in self._transports.values():
-            await transport.ensure_connected()
+        """Force a full reconnect + post-connect sync on all transports."""
+        for name, transport in self._transports.items():
+            try:
+                await transport.disconnect()
+            except Exception:
+                logger.warning("Transport '%s' disconnect failed during reconnect", name)
+            try:
+                await transport.ensure_connected()
+                if transport.is_connected:
+                    await self._post_connect_sync(transport, name)
+            except Exception:
+                logger.exception("Transport '%s' reconnect failed", name)
 
     async def run(self) -> None:
         """Main daemon loop."""
