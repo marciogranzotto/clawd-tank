@@ -1,0 +1,362 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-15 -25 45 45" width="500" height="500">
+  <defs>
+    <style>
+      .body-breathe {
+        transform-box: view-box;
+        transform-origin: 7.5px 12px;
+        animation: body-breathe 6s infinite ease-in-out;
+      }
+      @keyframes body-breathe {
+        0%, 18%, 84%, 100% { transform: translateY(0); }
+        38%, 64%           { transform: translateY(-0.28px); }
+        72%                { transform: translateY(-0.12px); }
+      }
+
+      #ground-shadow {
+        transform-box: view-box;
+        transform-origin: 7.5px 15.5px;
+        animation: shadow-breathe 6s infinite ease-in-out;
+      }
+      @keyframes shadow-breathe {
+        0%, 18%, 84%, 100% { opacity: 0.5; transform: scaleX(1); }
+        38%, 64%           { opacity: 0.36; transform: scaleX(0.86); }
+        72%                { opacity: 0.44; transform: scaleX(0.94); }
+      }
+
+      .body-tilt {
+        transform-box: view-box;
+        transform-origin: 7.5px 13px;
+        animation: body-tilt 6s infinite ease-in-out;
+      }
+      @keyframes body-tilt {
+        0%, 22%, 76%, 100% { transform: rotate(0deg) scaleY(1); }
+        30%                { transform: rotate(3deg) scaleY(0.97); }
+        39%                { transform: rotate(4.5deg) scaleY(0.97); }
+        48%                { transform: rotate(2deg) scaleY(0.97); }
+        57%                { transform: rotate(4deg) scaleY(0.97); }
+        66%                { transform: rotate(3deg) scaleY(0.97); }
+      }
+
+      .leg-left-inner {
+        transform-box: fill-box;
+        transform-origin: 50% 0%;
+        animation: leg-left-inner 6s infinite ease-in-out;
+      }
+      @keyframes leg-left-inner {
+        0%, 22%, 76%, 100% { transform: rotate(0deg); }
+        30%                { transform: rotate(12deg); }
+        36%                { transform: rotate(15deg); }
+        42%                { transform: rotate(9deg); }
+        48%                { transform: rotate(15deg); }
+        54%                { transform: rotate(9deg); }
+        60%                { transform: rotate(15deg); }
+        66%                { transform: rotate(12deg); }
+      }
+      .leg-left-outer {
+        transform-box: fill-box;
+        transform-origin: 50% 0%;
+        animation: leg-left-outer 6s infinite ease-in-out;
+      }
+      @keyframes leg-left-outer {
+        0%, 22%, 76%, 100% { transform: rotate(0deg); }
+        30%                { transform: rotate(22deg); }
+        36%                { transform: rotate(26deg); }
+        42%                { transform: rotate(19deg); }
+        48%                { transform: rotate(26deg); }
+        54%                { transform: rotate(19deg); }
+        60%                { transform: rotate(26deg); }
+        66%                { transform: rotate(22deg); }
+      }
+
+      .arm-l-balance {
+        transform-box: fill-box;
+        transform-origin: 100% 0%;
+        animation: arm-l-balance 6s infinite ease-in-out;
+      }
+      @keyframes arm-l-balance {
+        0%, 22%, 76%, 100% { transform: translate(0, 0) rotate(0deg); }
+        30%                { transform: translate(0, 0.5px) rotate(-2deg); }
+        37%                { transform: translate(0, 0.55px) rotate(1deg); }
+        44%                { transform: translate(0, 0.5px) rotate(-3deg); }
+        51%                { transform: translate(0, 0.55px) rotate(2deg); }
+        58%                { transform: translate(0, 0.5px) rotate(-1deg); }
+        66%                { transform: translate(0, 0.5px) rotate(0deg); }
+      }
+
+      .arm-r {
+        transform-origin: 13px 10px;
+        animation: arm-r 6s infinite ease-in-out;
+      }
+      @keyframes arm-r {
+        0%, 8%    { transform: none; }
+        16%, 22%  { transform: translateY(-3px) rotate(-90deg); }
+        30%, 66%  { transform: translateY(-4.5px) rotate(-90deg); }
+        76%       { transform: translateY(-3px) rotate(-90deg); }
+        80%, 100% { transform: none; }
+      }
+
+      .lightbulb-zone {
+        transform-box: view-box;
+        transform-origin: 0 0;
+        animation: lightbulb-zone 6s infinite ease-in-out;
+      }
+      @keyframes lightbulb-zone {
+        0%, 22%, 76%, 100% { transform: translate(0, 0); }
+        30%                { transform: translate(0, -1.5px); }
+        39%                { transform: translate(0.3px, -1.7px); }
+        48%                { transform: translate(-0.2px, -1.3px); }
+        57%                { transform: translate(0.3px, -1.6px); }
+        66%                { transform: translate(0, -1.5px); }
+      }
+
+      .eyes-rect {
+        transform-box: view-box;
+        transform-origin: 7.5px 9px;
+        animation:
+          eyes-rect-move 6s infinite ease-in-out,
+          eyes-rect-vis 6s infinite step-end;
+      }
+      @keyframes eyes-rect-move {
+        0%, 17%       { transform: translate(0, 0) scaleY(1); }
+        22%, 30%      { transform: translate(1px, -0.5px) scaleY(1); }   34%           { transform: translate(0, 0) scaleY(1); }          36%           { transform: translate(0, 0) scaleY(0.1); }        72%           { transform: translate(0, 0) scaleY(0.1); }        74%, 100%     { transform: translate(0, 0) scaleY(1); }          }
+      @keyframes eyes-rect-vis {
+        0%, 36%       { opacity: 1; }
+        37%, 72%      { opacity: 0; }
+        73%, 100%     { opacity: 1; }
+      }
+
+      .eyes-smile {
+        opacity: 0;
+        animation: eyes-smile-vis 6s infinite step-end;
+      }
+      @keyframes eyes-smile-vis {
+        0%, 36%       { opacity: 0; }
+        37%, 72%      { opacity: 1; }
+        73%, 100%     { opacity: 0; }
+      }
+
+      .bulb {
+        transform-box: view-box;
+        transform-origin: 0 0;
+        opacity: 0;
+        animation: bulb-fly 6s infinite ease-in-out;
+      }
+      @keyframes bulb-fly {
+        0%, 17%   { opacity: 0; transform: translate(9.5px, -2.7px) scale(0.15); }
+        19%       { opacity: 1; transform: translate(9.5px, -2.7px) scale(0.27); }
+        22%, 66%  { opacity: 1; transform: translate(9.5px, -2.7px) scale(0.24); }
+        70%, 100% { opacity: 0; transform: translate(9.5px, -2.7px) scale(0.2); }
+      }
+
+      .bulb rect[fill="#FFB000"] { animation: glass-edge 6s infinite step-end; }
+      .bulb rect[fill="#FFD400"] { animation: glass-main 6s infinite step-end; }
+      .bulb rect[fill="#E88900"] { animation: glass-shadow 6s infinite step-end; }
+      .bulb rect[fill="#FFFFFF"],
+      .bulb rect[fill="#FFF8B8"] { animation: glass-highlight 6s infinite step-end; }
+
+      @keyframes glass-main {
+        0%, 23%   { fill: #8A7428; }
+        24%, 70%  { fill: #FFD400; }
+        71%, 100% { fill: #8A7428; }
+      }
+      @keyframes glass-edge {
+        0%, 23%   { fill: #725B20; }
+        24%, 70%  { fill: #FFB000; }
+        71%, 100% { fill: #725B20; }
+      }
+      @keyframes glass-shadow {
+        0%, 23%   { fill: #56451D; }
+        24%, 70%  { fill: #E88900; }
+        71%, 100% { fill: #56451D; }
+      }
+      @keyframes glass-highlight {
+        0%, 23%   { opacity: 0.25; }
+        24%, 70%  { opacity: 1; }
+        71%, 100% { opacity: 0.25; }
+      }
+
+      .f-anim { animation: filament-f 6s infinite step-end; }
+      @keyframes filament-f {
+        0%, 23%   { fill: #555; }
+        24%, 70%  { fill: #C96E00; }
+        71%, 100% { fill: #555; }
+      }
+
+      .fg-anim { animation: filament-fg 6s infinite step-end; }
+      @keyframes filament-fg {
+        0%, 23%   { fill: #777; }
+        24%, 70%  { fill: #E89500; }
+        71%, 100% { fill: #777; }
+      }
+
+      .rays {
+        transform-box: view-box;
+        transform-origin: 13.5px 0.5px;
+        opacity: 0;
+        animation: rays-burst 6s infinite ease-in-out;
+      }
+      @keyframes rays-burst {
+        0%, 28%   { opacity: 0; transform: translate(-0.1px, -0.1px) scale(0.65); }
+        29%, 30%  { opacity: 0.9; transform: translate(-0.1px, -0.1px) scale(0.9); }
+        31%, 32%  { opacity: 0; transform: translate(-0.1px, -0.1px) scale(0.65); }
+        33%, 34%  { opacity: 0.9; transform: translate(-0.1px, -0.1px) scale(0.95); }
+        35%, 36%  { opacity: 0; transform: translate(-0.1px, -0.1px) scale(0.65); }
+        37%, 38%  { opacity: 0.9; transform: translate(-0.1px, -0.1px) scale(0.9); }
+        39%, 40%  { opacity: 0; transform: translate(-0.1px, -0.1px) scale(0.65); }
+        41%, 42%  { opacity: 0.9; transform: translate(-0.1px, -0.1px) scale(0.95); }
+        43%, 44%  { opacity: 0; transform: translate(-0.1px, -0.1px) scale(0.65); }
+        45%, 46%  { opacity: 0.9; transform: translate(-0.1px, -0.1px) scale(0.9); }
+        47%, 48%  { opacity: 0; transform: translate(-0.1px, -0.1px) scale(0.65); }
+        49%, 50%  { opacity: 0.9; transform: translate(-0.1px, -0.1px) scale(0.95); }
+        51%, 52%  { opacity: 0; transform: translate(-0.1px, -0.1px) scale(0.65); }
+        53%, 54%  { opacity: 0.9; transform: translate(-0.1px, -0.1px) scale(0.9); }
+        55%, 56%  { opacity: 0; transform: translate(-0.1px, -0.1px) scale(0.65); }
+        57%, 60%  { opacity: 1; transform: translate(-0.1px, -0.1px) scale(0.95); }
+        61%, 100% { opacity: 0; transform: translate(-0.1px, -0.1px) scale(0.65); }
+      }
+    </style>
+  </defs>
+
+  <rect id="ground-shadow" x="3" y="15" width="9" height="1" fill="#000000" opacity="0.5"/>
+
+  <g id="master-group" transform="translate(15, 0) scale(-1, 1)">
+    <g class="body-breathe">
+      <g class="body-tilt">
+        <rect class="leg-left-outer" x="3" y="13" width="1" height="2" fill="#DE886D"/>
+        <rect class="leg-left-inner" x="5" y="13" width="1" height="2" fill="#DE886D"/>
+
+        <rect x="2" y="6" width="11" height="7" fill="#DE886D"/>
+
+        <g class="eyes-rect" fill="#000000">
+          <rect x="4"  y="8" width="1" height="2"/>
+          <rect x="10" y="8" width="1" height="2"/>
+        </g>
+
+        <g class="eyes-smile" fill="none" stroke="#000000" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="3.5,9 4.5,8 5.5,9"/>
+          <polyline points="9.5,9 10.5,8 11.5,9"/>
+        </g>
+
+        <rect class="arm-l-balance" x="0" y="9" width="2" height="2" fill="#DE886D"/>
+      </g>
+
+      <rect x="9" y="13" width="1" height="2" fill="#DE886D"/>
+    </g>
+
+    <rect x="11" y="13" width="1" height="2" fill="#DE886D"/>
+
+    <g class="lightbulb-zone">
+      <g class="bulb">
+        <rect fill="#FFB000" x="12" y="2"  width="8"  height="1"/>
+        <rect fill="#FFB000" x="10" y="3"  width="12" height="1"/>
+        <rect fill="#FFB000" x="9"  y="4"  width="14" height="1"/>
+        <rect fill="#FFB000" x="8"  y="5"  width="16" height="1"/>
+        <rect fill="#FFB000" x="7"  y="6"  width="18" height="1"/>
+        <rect fill="#FFB000" x="6"  y="7"  width="20" height="1"/>
+        <rect fill="#FFB000" x="5"  y="8"  width="22" height="2"/>
+        <rect fill="#FFB000" x="4"  y="10" width="24" height="7"/>
+        <rect fill="#FFB000" x="5"  y="17" width="22" height="2"/>
+        <rect fill="#FFB000" x="6"  y="19" width="20" height="1"/>
+        <rect fill="#FFB000" x="7"  y="20" width="18" height="1"/>
+        <rect fill="#FFB000" x="8"  y="21" width="16" height="1"/>
+        <rect fill="#FFB000" x="9"  y="22" width="14" height="1"/>
+        <rect fill="#FFB000" x="10" y="23" width="12" height="1"/>
+        <rect fill="#FFB000" x="12" y="24" width="8"  height="2"/>
+
+        <rect fill="#FFD400" x="13" y="3"  width="6"  height="1"/>
+        <rect fill="#FFD400" x="11" y="4"  width="10" height="1"/>
+        <rect fill="#FFD400" x="10" y="5"  width="12" height="1"/>
+        <rect fill="#FFD400" x="9"  y="6"  width="14" height="1"/>
+        <rect fill="#FFD400" x="8"  y="7"  width="16" height="1"/>
+        <rect fill="#FFD400" x="7"  y="8"  width="18" height="2"/>
+        <rect fill="#FFD400" x="6"  y="10" width="20" height="7"/>
+        <rect fill="#FFD400" x="7"  y="17" width="18" height="2"/>
+        <rect fill="#FFD400" x="8"  y="19" width="16" height="1"/>
+        <rect fill="#FFD400" x="9"  y="20" width="14" height="1"/>
+        <rect fill="#FFD400" x="10" y="21" width="12" height="1"/>
+        <rect fill="#FFD400" x="11" y="22" width="10" height="1"/>
+        <rect fill="#FFD400" x="12" y="23" width="8"  height="1"/>
+        <rect fill="#FFD400" x="13" y="24" width="6"  height="2"/>
+
+        <rect fill="#E88900" x="21" y="4"  width="2" height="1"/>
+        <rect fill="#E88900" x="22" y="5"  width="1" height="2"/>
+        <rect fill="#E88900" x="24" y="8"  width="1" height="4"/>
+        <rect fill="#E88900" x="25" y="10" width="1" height="4"/>
+        <rect fill="#E88900" x="23" y="17" width="2" height="1"/>
+        <rect fill="#E88900" x="22" y="19" width="2" height="1"/>
+        <rect fill="#E88900" x="20" y="22" width="2" height="1"/>
+        <rect fill="#E88900" x="18" y="24" width="2" height="2"/>
+        <rect fill="#E88900" x="7"  y="8"  width="1" height="2"/>
+        <rect fill="#E88900" x="6"  y="17" width="1" height="1"/>
+        <rect fill="#E88900" x="8"  y="20" width="1" height="1"/>
+        <rect fill="#E88900" x="10" y="23" width="1" height="1"/>
+
+        <rect fill="#FFFFFF" x="13" y="4"  width="2" height="1"/>
+        <rect fill="#FFF8B8" x="12" y="5"  width="1" height="2"/>
+        <rect fill="#FFFFFF" x="11" y="7"  width="2" height="1"/>
+        <rect fill="#FFF8B8" x="10" y="8"  width="1" height="1"/>
+        <rect fill="#FFF8B8" x="9"  y="10" width="1" height="2"/>
+
+        <rect class="f-anim"  x="13" y="12" width="2" height="1"/>
+        <rect class="f-anim"  x="18" y="12" width="2" height="1"/>
+        <rect class="f-anim"  x="13" y="13" width="1" height="3"/>
+        <rect class="f-anim"  x="19" y="13" width="1" height="3"/>
+        <rect class="fg-anim" x="14" y="14" width="1" height="2"/>
+        <rect class="fg-anim" x="18" y="14" width="1" height="2"/>
+        <rect class="f-anim"  x="15" y="15" width="3" height="1"/>
+        <rect class="fg-anim" x="15" y="16" width="1" height="2"/>
+        <rect class="fg-anim" x="17" y="16" width="1" height="2"/>
+        <rect class="f-anim"  x="16" y="18" width="1" height="7"/>
+
+        <rect fill="#2E2E2E" x="11" y="25" width="10" height="1"/>
+        <rect fill="#2E2E2E" x="12" y="26" width="1"  height="1"/>
+        <rect fill="#9B9B9B" x="13" y="26" width="2"  height="1"/>
+        <rect fill="#D7D7D7" x="15" y="26" width="4"  height="1"/>
+        <rect fill="#2E2E2E" x="19" y="26" width="1"  height="1"/>
+        <rect fill="#2E2E2E" x="11" y="27" width="1"  height="1"/>
+        <rect fill="#9B9B9B" x="12" y="27" width="3"  height="1"/>
+        <rect fill="#D7D7D7" x="15" y="27" width="4"  height="1"/>
+        <rect fill="#666666" x="19" y="27" width="1"  height="1"/>
+        <rect fill="#2E2E2E" x="20" y="27" width="1"  height="1"/>
+        <rect fill="#2E2E2E" x="12" y="28" width="1"  height="1"/>
+        <rect fill="#9B9B9B" x="13" y="28" width="2"  height="1"/>
+        <rect fill="#D7D7D7" x="15" y="28" width="4"  height="1"/>
+        <rect fill="#2E2E2E" x="19" y="28" width="1"  height="1"/>
+        <rect fill="#2E2E2E" x="11" y="29" width="1"  height="1"/>
+        <rect fill="#9B9B9B" x="12" y="29" width="3"  height="1"/>
+        <rect fill="#D7D7D7" x="15" y="29" width="4"  height="1"/>
+        <rect fill="#666666" x="19" y="29" width="1"  height="1"/>
+        <rect fill="#2E2E2E" x="20" y="29" width="1"  height="1"/>
+        <rect fill="#2E2E2E" x="12" y="30" width="1"  height="1"/>
+        <rect fill="#9B9B9B" x="13" y="30" width="2"  height="1"/>
+        <rect fill="#D7D7D7" x="15" y="30" width="4"  height="1"/>
+        <rect fill="#2E2E2E" x="19" y="30" width="1"  height="1"/>
+        <rect fill="#2E2E2E" x="13" y="31" width="6"  height="1"/>
+        <rect fill="#2E2E2E" x="14" y="32" width="4"  height="1"/>
+      </g>
+
+      <g class="rays" fill="#FFFFFF">
+        <rect x="13" y="-5" width="1" height="1"/>
+        <rect x="13" y="-4" width="1" height="1"/>
+        <rect x="13" y="4"  width="1" height="1"/>
+        <rect x="13" y="5"  width="1" height="1"/>
+        <rect x="6"  y="0"  width="1" height="1"/>
+        <rect x="7"  y="0"  width="1" height="1"/>
+        <rect x="19" y="0"  width="1" height="1"/>
+        <rect x="20" y="0"  width="1" height="1"/>
+        <rect x="9"  y="-3" width="1" height="1"/>
+        <rect x="17" y="-3" width="1" height="1"/>
+        <rect x="9"  y="3"  width="1" height="1"/>
+        <rect x="17" y="3"  width="1" height="1"/>
+      </g>
+    </g>
+
+    <g class="body-breathe">
+      <g class="body-tilt">
+        <g class="arm-r" fill="#DE886D">
+          <rect x="13" y="9" width="2" height="2"/>
+        </g>
+      </g>
+    </g>
+  </g>
+</svg>
