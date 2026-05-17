@@ -194,6 +194,12 @@ class ClawdDaemon:
             extra = f" agent={msg.get('agent_id', '?')[:12]}"
         elif event == "add":
             extra = f" msg={msg.get('message', '')[:30]}"
+        if msg.get("source"):
+            extra += f" source={msg['source']}"
+        if msg.get("reason"):
+            extra += f" reason={msg['reason']}"
+        if msg.get("pid"):
+            extra += f" pid={msg['pid']}"
         session_project = ""
         if session_id:
             s = self._session_states.get(session_id)
