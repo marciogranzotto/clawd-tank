@@ -178,14 +178,22 @@ async def test_last_display_state_tracks_changes():
 
 def test_staleness_evicts_old_sessions():
     d = make_daemon()
-    d._session_states["s1"] = {"state": "idle", "last_event": time.time() - 9999}
+    d._session_states["s1"] = {
+        "state": "idle",
+        "last_event": time.time() - 9999,
+        "last_event_monotonic": time.monotonic() - 9999,
+    }
     d._session_staleness_timeout = 1
     d._evict_stale_sessions()
     assert "s1" not in d._session_states
 
 def test_staleness_keeps_fresh_sessions():
     d = make_daemon()
-    d._session_states["s1"] = {"state": "idle", "last_event": time.time()}
+    d._session_states["s1"] = {
+        "state": "idle",
+        "last_event": time.time(),
+        "last_event_monotonic": time.monotonic(),
+    }
     d._session_staleness_timeout = 600
     d._evict_stale_sessions()
     assert "s1" in d._session_states
@@ -282,13 +290,14 @@ async def test_subagent_start_with_empty_agent_id_ignored():
 # --- Task 4 / Task 5: eviction suppression and subagent display state ---
 
 def test_staleness_evicts_sessions_with_dead_subagents():
-    """Stale sessions are evicted even if subagents exist — stale last_event
+    """Stale sessions are evicted even if subagents exist — stale last_event_monotonic
     means subagent tool calls stopped refreshing it, so they're dead."""
     d = make_daemon()
     d._session_staleness_timeout = 1
     d._session_states["s1"] = {
         "state": "idle",
         "last_event": time.time() - 9999,
+        "last_event_monotonic": time.monotonic() - 9999,
         "subagents": {"a1"},
     }
     d._evict_stale_sessions()
@@ -297,12 +306,13 @@ def test_staleness_evicts_sessions_with_dead_subagents():
 
 def test_staleness_keeps_sessions_with_active_subagents():
     """Sessions with active subagents stay alive because subagent tool calls
-    refresh last_event via PreToolUse on the parent session."""
+    refresh last_event_monotonic via PreToolUse on the parent session."""
     d = make_daemon()
     d._session_staleness_timeout = 600
     d._session_states["s1"] = {
         "state": "idle",
         "last_event": time.time(),  # fresh — subagent is active
+        "last_event_monotonic": time.monotonic(),
         "subagents": {"a1"},
     }
     d._evict_stale_sessions()
@@ -417,6 +427,7 @@ async def test_subagent_lifecycle():
 
     # Staleness eviction works normally
     d._session_states["s1"]["last_event"] = time.time() - 9999
+    d._session_states["s1"]["last_event_monotonic"] = time.monotonic() - 9999
     d._evict_stale_sessions()
     assert "s1" not in d._session_states
     assert d._compute_display_state() == {"status": "sleeping"}
@@ -424,12 +435,13 @@ async def test_subagent_lifecycle():
 
 @pytest.mark.asyncio
 async def test_stale_subagents_evicted_with_session():
-    """Missed SubagentStop hooks don't prevent eviction — if last_event is
+    """Missed SubagentStop hooks don't prevent eviction — if last_event_monotonic is
     stale, subagent tool calls stopped refreshing it, so they're dead."""
     d = make_daemon()
     d._session_staleness_timeout = 1
     d._session_states["s1"] = {
         "state": "idle", "last_event": time.time() - 9999,
+        "last_event_monotonic": time.monotonic() - 9999,
         "subagents": {"orphan1", "orphan2"},
     }
     d._evict_stale_sessions()
@@ -487,7 +499,11 @@ async def test_daemon_persists_on_state_transition(tmp_path):
 def test_daemon_persists_on_eviction(tmp_path):
     path = tmp_path / "sessions.json"
     d = make_daemon_with_path(path)
-    d._session_states["s1"] = {"state": "idle", "last_event": time.time() - 9999}
+    d._session_states["s1"] = {
+        "state": "idle",
+        "last_event": time.time() - 9999,
+        "last_event_monotonic": time.monotonic() - 9999,
+    }
     d._session_staleness_timeout = 1
     d._evict_stale_sessions()
     data = json.loads(path.read_text())
@@ -831,7 +847,11 @@ async def test_error_state_removed_on_session_end():
 def test_error_state_evicted_on_staleness():
     d = make_daemon()
     d._session_staleness_timeout = 1
-    d._session_states["s1"] = {"state": "error", "last_event": time.time() - 9999}
+    d._session_states["s1"] = {
+        "state": "error",
+        "last_event": time.time() - 9999,
+        "last_event_monotonic": time.monotonic() - 9999,
+    }
     d._evict_stale_sessions()
     assert "s1" not in d._session_states
 
@@ -1072,3 +1092,33 @@ def test_init_prunes_wall_clock_stale_sessions(tmp_path):
     assert "fresh" in d._session_states
     assert "stale" not in d._session_states
     assert d._session_order == [("fresh", 1)]
+
+
+# --- Task 7: monotonic-based staleness eviction ---
+
+
+def test_staleness_uses_monotonic_not_wall_clock():
+    """A session with old wall-clock last_event but fresh monotonic time
+    should NOT be evicted — covers macOS sleep/wake scenario."""
+    d = make_daemon()
+    d._session_states["s1"] = {
+        "state": "idle",
+        "last_event": time.time() - 9999,            # ancient wall clock
+        "last_event_monotonic": time.monotonic(),    # but fresh monotonic
+    }
+    d._session_staleness_timeout = 600
+    d._evict_stale_sessions()
+    assert "s1" in d._session_states, "monotonic-fresh session evicted incorrectly"
+
+
+def test_staleness_evicts_when_monotonic_old():
+    """Session with old monotonic time is evicted regardless of wall clock."""
+    d = make_daemon()
+    d._session_states["s1"] = {
+        "state": "idle",
+        "last_event": time.time(),
+        "last_event_monotonic": time.monotonic() - 9999,
+    }
+    d._session_staleness_timeout = 1
+    d._evict_stale_sessions()
+    assert "s1" not in d._session_states

@@ -171,7 +171,7 @@ class ClawdDaemon:
         self._last_display_state: dict = {"status": "sleeping"}
         self._transport_versions: dict[str, int] = {}  # transport_name → protocol version
         self._session_staleness_timeout: float = 600.0
-        self._evict_stale_sessions()
+        # _evict_stale_sessions() removed — Task 6 startup prune covers this.
 
     async def _handle_message(self, msg: dict) -> None:
         """Handle a message from clawd-tank-notify via the socket."""
@@ -383,11 +383,12 @@ class ClawdDaemon:
 
     def _evict_stale_sessions(self) -> None:
         # Active subagents refresh last_event via PreToolUse on the parent session.
-        # If last_event is stale, subagents are dead too — safe to evict.
-        now = time.time()
+        # If last_event_monotonic is stale, subagents are dead too — safe to evict.
+        # Uses monotonic time so macOS sleep doesn't trigger mass-eviction on wake.
+        now_mono = time.monotonic()
         stale = [
             sid for sid, s in self._session_states.items()
-            if now - s["last_event"] > self._session_staleness_timeout
+            if now_mono - s.get("last_event_monotonic", now_mono) > self._session_staleness_timeout
         ]
         for sid in stale:
             logger.info("Evicting stale session: %s", sid[:12])
