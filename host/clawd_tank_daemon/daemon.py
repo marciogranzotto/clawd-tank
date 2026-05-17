@@ -456,6 +456,42 @@ class ClawdDaemon:
             self._evict_stale_sessions()
             await self._broadcast_display_state_if_changed()
 
+    def _check_liveness(self) -> list[str]:
+        """Synchronous half of the liveness check — separated for testability.
+
+        Returns the list of evicted session_ids.
+        """
+        dead = []
+        for sid, state in self._session_states.items():
+            pid = state.get("pid")
+            if pid is None:
+                continue
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                dead.append(sid)
+            except PermissionError:
+                pass  # PID belongs to another user — assume alive
+        for sid in dead:
+            logger.info(
+                "Liveness: evicting session %s (PID %d gone)",
+                sid[:12], self._session_states[sid].get("pid"),
+            )
+            del self._session_states[sid]
+            self._session_order = [(s, d) for s, d in self._session_order if s != sid]
+            self._active_notifications.pop(sid, None)
+        if dead:
+            self._persist_sessions()
+        return dead
+
+    async def _liveness_checker(self) -> None:
+        """Async task: every 30s, evict sessions whose Claude Code PID is gone."""
+        while self._running:
+            await asyncio.sleep(30)
+            evicted = self._check_liveness()
+            if evicted:
+                await self._broadcast_display_state_if_changed()
+
     def set_session_timeout(self, seconds: int) -> None:
         self._session_staleness_timeout = float(seconds)
         logger.info("Session staleness timeout set to %ds", seconds)
@@ -585,6 +621,13 @@ class ClawdDaemon:
             except asyncio.CancelledError:
                 pass
 
+        if hasattr(self, '_liveness_task'):
+            self._liveness_task.cancel()
+            try:
+                await self._liveness_task
+            except asyncio.CancelledError:
+                pass
+
         for task in self._sender_tasks.values():
             task.cancel()
         for task in self._sender_tasks.values():
@@ -682,6 +725,7 @@ class ClawdDaemon:
             self._sender_tasks[name] = asyncio.create_task(self._transport_sender(name))
 
         self._staleness_task = asyncio.create_task(self._staleness_checker())
+        self._liveness_task = asyncio.create_task(self._liveness_checker())
 
         await self._shutdown_event.wait()
         logger.info("Daemon run() finished")

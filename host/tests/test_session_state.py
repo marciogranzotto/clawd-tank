@@ -1221,3 +1221,90 @@ async def test_dedup_only_fires_on_session_start():
 
     assert "old" in d._session_states
     assert "new" in d._session_states
+
+
+# --- Liveness polling (ghost-crab fix) ---
+
+def test_liveness_evicts_dead_pid():
+    """Session whose stored PID raises ProcessLookupError on kill(pid, 0) is evicted."""
+    from unittest.mock import patch
+    d = make_daemon()
+    d._session_states["s1"] = {
+        "state": "idle", "last_event": time.time(),
+        "last_event_monotonic": time.monotonic(), "pid": 4242,
+    }
+    d._session_order = [("s1", 1)]
+
+    with patch("clawd_tank_daemon.daemon.os.kill", side_effect=ProcessLookupError):
+        d._check_liveness()
+
+    assert "s1" not in d._session_states
+    assert d._session_order == []
+
+
+def test_liveness_keeps_alive_pid():
+    """Session whose PID is alive (kill returns) stays."""
+    from unittest.mock import patch
+    d = make_daemon()
+    d._session_states["s1"] = {
+        "state": "idle", "last_event": time.time(),
+        "last_event_monotonic": time.monotonic(), "pid": 4242,
+    }
+
+    with patch("clawd_tank_daemon.daemon.os.kill", return_value=None):
+        d._check_liveness()
+
+    assert "s1" in d._session_states
+
+
+def test_liveness_skips_sessions_without_pid():
+    """No-pid sessions (e.g. post-restart, pre-first-event) are skipped, not evicted."""
+    from unittest.mock import patch
+    d = make_daemon()
+    d._session_states["s1"] = {
+        "state": "idle", "last_event": time.time(),
+        "last_event_monotonic": time.monotonic(),
+    }
+
+    with patch("clawd_tank_daemon.daemon.os.kill", side_effect=ProcessLookupError):
+        d._check_liveness()
+
+    assert "s1" in d._session_states
+
+
+def test_liveness_treats_permission_error_as_alive():
+    """If kill raises PermissionError (PID belongs to another user), assume alive."""
+    from unittest.mock import patch
+    d = make_daemon()
+    d._session_states["s1"] = {
+        "state": "idle", "last_event": time.time(),
+        "last_event_monotonic": time.monotonic(), "pid": 4242,
+    }
+
+    with patch("clawd_tank_daemon.daemon.os.kill", side_effect=PermissionError):
+        d._check_liveness()
+
+    assert "s1" in d._session_states
+
+
+def test_liveness_persists_after_eviction(tmp_path):
+    """After evicting a dead session, the persisted sessions.json reflects it."""
+    from unittest.mock import patch
+    from clawd_tank_daemon.daemon import ClawdDaemon
+
+    d = ClawdDaemon(sim_only=True, sessions_path=tmp_path / "sessions.json")
+    d._transports.clear()
+    d._transport_queues.clear()
+    d._session_states["s1"] = {
+        "state": "idle", "last_event": time.time(),
+        "last_event_monotonic": time.monotonic(), "pid": 4242,
+    }
+    d._session_order = [("s1", 1)]
+
+    with patch("clawd_tank_daemon.daemon.os.kill", side_effect=ProcessLookupError):
+        d._check_liveness()
+
+    # Persist file should not contain s1
+    import json as _json
+    raw = _json.loads((tmp_path / "sessions.json").read_text())
+    assert "s1" not in raw.get("sessions", {})
