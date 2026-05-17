@@ -45,12 +45,12 @@ def test_walks_past_shell_wrapper():
 
 
 def test_node_install_matches_via_command_regex():
-    """Node-wrapped install: comm is 'node', command starts with 'node /path/to/claude'."""
+    """Node-wrapped install: comm is 'node', argv invokes a path ending in `claude`."""
     with patch("clawd_tank_daemon.pid_resolver.os.getppid", return_value=400):
         with patch("clawd_tank_daemon.pid_resolver.subprocess.run") as run:
             run.side_effect = _make_ps_mock({
                 ("comm", 400): "node",
-                ("command", 400): "node /opt/claude-code/cli.js",
+                ("command", 400): "node /opt/claude-code/bin/claude --resume xyz",
             })
             assert find_claude_pid() == 400
 

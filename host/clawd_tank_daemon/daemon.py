@@ -423,6 +423,7 @@ class ClawdDaemon:
         for sid in stale:
             logger.info("Evicting stale session: %s", sid[:12])
             del self._session_states[sid]
+            self._active_notifications.pop(sid, None)
         if stale:
             self._session_order = [(sid, did) for sid, did in self._session_order if sid not in stale]
             self._persist_sessions()
