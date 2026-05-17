@@ -21,10 +21,12 @@ def save_sessions(
     """Save session states to JSON atomically. Sets are converted to sorted lists.
 
     Optional order and next_id persist session arrival order with stable display IDs.
+
+    `last_event_monotonic` is in-memory only and excluded from the persisted state.
     """
     serializable = {}
     for sid, state in sessions.items():
-        entry = {**state}
+        entry = {k: v for k, v in state.items() if k != "last_event_monotonic"}
         if "subagents" in entry:
             entry["subagents"] = sorted(entry["subagents"])
         serializable[sid] = entry
@@ -77,6 +79,10 @@ def load_sessions(path: Path = SESSIONS_PATH) -> tuple[dict[str, dict], list[tup
                 continue
             if not isinstance(state["last_event"], (int, float)):
                 continue
+            # Drop unsafe-across-restart fields. PID may have been recycled;
+            # monotonic time is meaningless after process restart.
+            state.pop("pid", None)
+            state.pop("last_event_monotonic", None)
             if "subagents" in state:
                 if not isinstance(state["subagents"], list):
                     del state["subagents"]
