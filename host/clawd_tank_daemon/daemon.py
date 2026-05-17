@@ -44,6 +44,7 @@ def _tool_to_anim(tool_name: str) -> str:
 
 PID_PATH = Path.home() / ".clawd-tank" / "daemon.pid"
 LOCK_PATH = Path.home() / ".clawd-tank" / "daemon.lock"
+PID_DEDUP_FRESHNESS_SECONDS = 60.0
 
 
 @runtime_checkable
@@ -207,6 +208,29 @@ class ClawdDaemon:
             self._active_notifications[session_id] = msg
         elif event == "dismiss":
             self._active_notifications.pop(session_id, None)
+
+        # --- PID-based dedup: SessionStart with PID matching a recent session = /clear ---
+        if event == "session_start":
+            incoming_pid = msg.get("pid")
+            if incoming_pid is not None:
+                now_mono = time.monotonic()
+                to_evict = []
+                for sid, state in self._session_states.items():
+                    if sid == session_id:
+                        continue
+                    if state.get("pid") != incoming_pid:
+                        continue
+                    last_mono = state.get("last_event_monotonic", now_mono)
+                    if now_mono - last_mono < PID_DEDUP_FRESHNESS_SECONDS:
+                        to_evict.append(sid)
+                for sid in to_evict:
+                    logger.info(
+                        "PID dedup: evicting session %s (PID %d reused by new session %s)",
+                        sid[:12], incoming_pid, session_id[:12],
+                    )
+                    del self._session_states[sid]
+                    self._session_order = [(s, d) for s, d in self._session_order if s != sid]
+                    self._active_notifications.pop(sid, None)
 
         changed = self._update_session_state(
             event, hook, session_id,

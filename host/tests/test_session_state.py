@@ -1122,3 +1122,102 @@ def test_staleness_evicts_when_monotonic_old():
     d._session_staleness_timeout = 1
     d._evict_stale_sessions()
     assert "s1" not in d._session_states
+
+
+# --- PID-based /clear dedup (ghost-crab fix) ---
+
+@pytest.mark.asyncio
+async def test_session_start_evicts_prior_session_with_same_pid_recent():
+    """SessionStart with PID that matches a recently-active session = /clear case.
+    Old session is evicted in the same _handle_message call."""
+    d = make_daemon()
+    d._session_states["old"] = {
+        "state": "idle",
+        "last_event": time.time(),
+        "last_event_monotonic": time.monotonic(),  # very recent
+        "pid": 4242,
+    }
+    d._session_order = [("old", 1)]
+    d._next_display_id = 2
+
+    await d._handle_message({"event": "session_start", "session_id": "new", "pid": 4242})
+
+    assert "old" not in d._session_states, "/clear dedup did not evict old session"
+    assert "new" in d._session_states
+    assert d._session_order == [("new", 2)], "session_order not scrubbed/updated"
+
+
+@pytest.mark.asyncio
+async def test_session_start_does_NOT_evict_stale_session_with_same_pid():
+    """If the matching session is >60s old (monotonic), assume PID recycle, no eviction."""
+    d = make_daemon()
+    d._session_states["old"] = {
+        "state": "idle",
+        "last_event": time.time(),
+        "last_event_monotonic": time.monotonic() - 120,  # 2 min old
+        "pid": 4242,
+    }
+    d._session_order = [("old", 1)]
+    d._next_display_id = 2
+
+    await d._handle_message({"event": "session_start", "session_id": "new", "pid": 4242})
+
+    assert "old" in d._session_states, "PID-recycle dedup wrongly evicted stale session"
+    assert "new" in d._session_states
+
+
+@pytest.mark.asyncio
+async def test_session_start_without_pid_does_not_dedup():
+    """Backwards-compat: old notify script sends no pid; dedup is skipped safely."""
+    d = make_daemon()
+    d._session_states["old"] = {
+        "state": "idle",
+        "last_event": time.time(),
+        "last_event_monotonic": time.monotonic(),
+        "pid": 4242,
+    }
+    d._session_order = [("old", 1)]
+    d._next_display_id = 2
+
+    await d._handle_message({"event": "session_start", "session_id": "new"})  # no pid
+
+    assert "old" in d._session_states
+    assert "new" in d._session_states
+
+
+@pytest.mark.asyncio
+async def test_dedup_scrubs_active_notifications():
+    """Evicted session's notification card is also removed."""
+    d = make_daemon()
+    d._session_states["old"] = {
+        "state": "idle",
+        "last_event": time.time(),
+        "last_event_monotonic": time.monotonic(),
+        "pid": 4242,
+    }
+    d._active_notifications["old"] = {"event": "add", "session_id": "old"}
+    d._session_order = [("old", 1)]
+    d._next_display_id = 2
+
+    await d._handle_message({"event": "session_start", "session_id": "new", "pid": 4242})
+
+    assert "old" not in d._active_notifications
+
+
+@pytest.mark.asyncio
+async def test_dedup_only_fires_on_session_start():
+    """A tool_use event with matching PID does NOT trigger dedup."""
+    d = make_daemon()
+    d._session_states["old"] = {
+        "state": "idle",
+        "last_event": time.time(),
+        "last_event_monotonic": time.monotonic(),
+        "pid": 4242,
+    }
+    d._session_order = [("old", 1)]
+    d._next_display_id = 2
+
+    await d._handle_message({"event": "tool_use", "session_id": "new", "pid": 4242, "tool_name": "Edit"})
+
+    assert "old" in d._session_states
+    assert "new" in d._session_states
