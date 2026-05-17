@@ -508,3 +508,77 @@ def test_display_state_to_v1_dizzy_maps_to_confused():
     payload = display_state_to_v1_payload(state)
     parsed = json.loads(payload)
     assert parsed["status"] == "confused"
+
+
+# --- PID, source, reason capture (ghost-crab fix) ---
+
+def test_session_start_includes_pid_and_source():
+    """SessionStart payload's pid and source fields flow through to daemon msg."""
+    from clawd_tank_daemon.protocol import hook_payload_to_daemon_message
+    msg = hook_payload_to_daemon_message({
+        "hook_event_name": "SessionStart",
+        "session_id": "s1",
+        "cwd": "/foo/bar",
+        "pid": 4242,
+        "source": "clear",
+    })
+    assert msg["pid"] == 4242
+    assert msg["source"] == "clear"
+
+
+def test_session_end_includes_pid_and_reason():
+    from clawd_tank_daemon.protocol import hook_payload_to_daemon_message
+    msg = hook_payload_to_daemon_message({
+        "hook_event_name": "SessionEnd",
+        "session_id": "s1",
+        "pid": 4242,
+        "reason": "logout",
+    })
+    assert msg["pid"] == 4242
+    assert msg["reason"] == "logout"
+
+
+def test_pre_tool_use_includes_pid():
+    from clawd_tank_daemon.protocol import hook_payload_to_daemon_message
+    msg = hook_payload_to_daemon_message({
+        "hook_event_name": "PreToolUse",
+        "session_id": "s1",
+        "cwd": "/foo",
+        "tool_name": "Edit",
+        "pid": 4242,
+    })
+    assert msg["pid"] == 4242
+
+
+def test_stop_includes_pid():
+    from clawd_tank_daemon.protocol import hook_payload_to_daemon_message
+    msg = hook_payload_to_daemon_message({
+        "hook_event_name": "Stop",
+        "session_id": "s1",
+        "cwd": "/foo",
+        "pid": 4242,
+    })
+    assert msg["pid"] == 4242
+
+
+def test_session_start_missing_pid_field_omits_it():
+    """Backwards compat — old notify script without pid still produces valid msg."""
+    from clawd_tank_daemon.protocol import hook_payload_to_daemon_message
+    msg = hook_payload_to_daemon_message({
+        "hook_event_name": "SessionStart",
+        "session_id": "s1",
+        "cwd": "/foo",
+    })
+    assert "pid" not in msg or msg.get("pid") is None
+    assert msg.get("source") is None or "source" not in msg
+
+
+def test_subagent_start_includes_pid():
+    from clawd_tank_daemon.protocol import hook_payload_to_daemon_message
+    msg = hook_payload_to_daemon_message({
+        "hook_event_name": "SubagentStart",
+        "session_id": "s1",
+        "agent_id": "a1",
+        "pid": 4242,
+    })
+    assert msg["pid"] == 4242
