@@ -148,6 +148,23 @@ class ClawdDaemon:
         self._headless = headless
         self._sessions_path = sessions_path if sessions_path is not None else session_store.SESSIONS_PATH
         loaded_states, loaded_order, loaded_next_id = load_sessions(self._sessions_path)
+
+        # One-shot startup prune by wall-clock: if last_event is older than the
+        # staleness timeout, the session almost certainly belongs to a dead Claude
+        # Code process from before the daemon restarted. After this prune we switch
+        # to monotonic time for runtime tracking (survives macOS sleep/wake).
+        now_wall = time.time()
+        stale_ids = [
+            sid for sid, s in loaded_states.items()
+            if now_wall - s.get("last_event", now_wall) > 600.0  # default timeout
+        ]
+        for sid in stale_ids:
+            del loaded_states[sid]
+        loaded_order = [(sid, did) for sid, did in loaded_order if sid not in stale_ids]
+
+        now_mono = time.monotonic()
+        for state in loaded_states.values():
+            state["last_event_monotonic"] = now_mono
         self._session_states: dict[str, dict] = loaded_states
         self._session_order: list[tuple[str, int]] = loaded_order
         self._next_display_id: int = loaded_next_id
@@ -191,7 +208,11 @@ class ClawdDaemon:
         elif event == "dismiss":
             self._active_notifications.pop(session_id, None)
 
-        changed = self._update_session_state(event, hook, session_id, msg.get("agent_id", ""), msg.get("tool_name", ""))
+        changed = self._update_session_state(
+            event, hook, session_id,
+            msg.get("agent_id", ""), msg.get("tool_name", ""),
+            pid=msg.get("pid"),
+        )
 
         # Store project name after session state is created
         if project and session_id and session_id in self._session_states:
@@ -282,7 +303,10 @@ class ClawdDaemon:
             result["overflow"] = len(self._session_order) - 4
         return result
 
-    def _update_session_state(self, event: str, hook: str, session_id: str, agent_id: str = "", tool_name: str = "") -> bool:
+    def _update_session_state(
+        self, event: str, hook: str, session_id: str,
+        agent_id: str = "", tool_name: str = "", pid: Optional[int] = None,
+    ) -> bool:
         """Update per-session state based on a received event.
 
         Returns True if session state or subagents changed structurally
@@ -291,6 +315,7 @@ class ClawdDaemon:
         if not session_id:
             return False
         now = time.time()
+        now_mono = time.monotonic()
         prev = self._session_states.get(session_id)
         prev_state = prev["state"] if prev else None
         prev_subagents = prev.get("subagents", set()).copy() if prev else None
@@ -344,6 +369,13 @@ class ClawdDaemon:
         if cur is not None and session_id not in [sid for sid, _ in self._session_order]:
             self._session_order.append((session_id, self._next_display_id))
             self._next_display_id += 1
+
+        # Stamp PID + monotonic on every event (only if session still exists —
+        # SessionEnd may have just removed it).
+        if cur is not None:
+            if pid is not None:
+                cur["pid"] = pid
+            cur["last_event_monotonic"] = now_mono
 
         if cur is None:
             return prev is not None  # session was removed
