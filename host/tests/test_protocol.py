@@ -647,6 +647,21 @@ def test_display_state_to_v1_alert_maps_to_confused():
     assert parsed["status"] == "confused"
 
 
+def test_display_state_to_v1_alert_outranks_working():
+    """A 'needs your input' session must surface on v1 even when another session works."""
+    state = {"anims": ["alert", "typing"], "ids": [1, 2], "subagents": 0}
+    payload = display_state_to_v1_payload(state)
+    parsed = json.loads(payload)
+    assert parsed["status"] == "confused", "alert must outrank working on v1"
+
+
+def test_display_state_to_v1_alert_outranks_thinking():
+    state = {"anims": ["thinking", "alert"], "ids": [1, 2], "subagents": 0}
+    payload = display_state_to_v1_payload(state)
+    parsed = json.loads(payload)
+    assert parsed["status"] == "confused"
+
+
 # --- PermissionRequest (waiting/alert) and PostToolUseFailure (confused) ---
 
 

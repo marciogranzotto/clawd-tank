@@ -9,6 +9,8 @@ import stat
 import textwrap
 from pathlib import Path
 
+from clawd_tank_daemon.protocol import ASK_USER_QUESTION_TOOL
+
 logger = logging.getLogger("clawd-tank.hooks")
 
 CLAWD_DIR = Path.home() / ".clawd-tank"
@@ -223,7 +225,7 @@ HOOKS_CONFIG = {
     # tool would double the device's event/BLE traffic for no added value.
     "PostToolUse": [
         {
-            "matcher": "AskUserQuestion",
+            "matcher": ASK_USER_QUESTION_TOOL,
             "hooks": [{"type": "command", "command": HOOK_COMMAND}],
         }
     ],
@@ -270,14 +272,35 @@ def _matcher_of(entry: dict):
     return matcher if matcher else None
 
 
+def _command_is_ours(command) -> bool:
+    """True only if a hook command actually invokes our notify script — the exact
+    path, or the path followed by args. A command that merely CONTAINS the path as a
+    substring (a wrapper, or `cat <path>`) is not ours."""
+    if not isinstance(command, str):
+        return False
+    return command == HOOK_COMMAND or command.startswith(HOOK_COMMAND + " ")
+
+
 def _group_runs_our_command(entry: dict) -> bool:
     """True if a hook group contains a hook that runs the Clawd Tank notify script."""
     if not isinstance(entry, dict):
         return False
-    for h in entry.get("hooks", []):
-        if isinstance(h, dict) and HOOK_COMMAND in (h.get("command") or ""):
-            return True
-    return False
+    hooks_list = entry.get("hooks")
+    if not isinstance(hooks_list, list):
+        return False
+    return any(isinstance(h, dict) and _command_is_ours(h.get("command", "")) for h in hooks_list)
+
+
+def _is_our_managed_group(entry: dict) -> bool:
+    """True if this group was created by Clawd Tank — a non-empty hooks list where
+    EVERY hook runs our notify script. Such groups are safe to prune on install;
+    a group the user shares with us (mixing their command with ours) is not."""
+    if not isinstance(entry, dict):
+        return False
+    hooks_list = entry.get("hooks")
+    if not isinstance(hooks_list, list) or not hooks_list:
+        return False
+    return all(isinstance(h, dict) and _command_is_ours(h.get("command", "")) for h in hooks_list)
 
 
 def _our_hook_present(existing_entries, our_matcher) -> bool:
@@ -310,17 +333,26 @@ def are_hooks_installed() -> bool:
         return False
     for event_name, our_entries in HOOKS_CONFIG.items():
         existing = hooks.get(event_name, [])
+        expected_matchers = {_matcher_of(e) for e in our_entries}
+        # (a) every expected event+matcher must be present
         for our_entry in our_entries:
             if not _our_hook_present(existing, _matcher_of(our_entry)):
                 return False
+        # (b) no leftover Clawd Tank group under a matcher we no longer use —
+        # otherwise a superseded group would persist forever (install never re-runs).
+        if isinstance(existing, list):
+            for g in existing:
+                if _is_our_managed_group(g) and _matcher_of(g) not in expected_matchers:
+                    return False
     return True
 
 
 def install_hooks() -> bool:
-    """Merge Clawd Tank hooks into Claude Code settings without clobbering the
-    user's own hooks. Additive and idempotent: for each event+matcher we manage,
-    append our hook group only if it is not already registered. Existing groups —
-    including the user's — are never modified or removed. Returns True on success.
+    """Merge Clawd Tank hooks into Claude Code settings without clobbering the user's
+    own hooks. For each managed event we drop our OWN prior groups (so a changed
+    matcher self-heals instead of leaving a stale duplicate), then append the current
+    config only where it isn't already present. The user's groups — and any group the
+    user shares with us — are never modified or removed. Idempotent. Returns True.
     """
     CLAUDE_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
 
@@ -343,11 +375,13 @@ def install_hooks() -> bool:
         existing = hooks.get(event_name)
         if not isinstance(existing, list):
             existing = []
-            hooks[event_name] = existing
+        # Prune our own prior groups (self-heal across matcher/config changes); keep
+        # the user's groups and any group the user shares with us untouched.
+        kept = [g for g in existing if not _is_our_managed_group(g)]
         for our_entry in our_entries:
-            if _our_hook_present(existing, _matcher_of(our_entry)):
-                continue  # already registered — don't duplicate, don't touch theirs
-            existing.append(copy.deepcopy(our_entry))
+            if not _our_hook_present(kept, _matcher_of(our_entry)):
+                kept.append(copy.deepcopy(our_entry))
+        hooks[event_name] = kept
 
     CLAUDE_SETTINGS_PATH.write_text(json.dumps(settings, indent=2) + "\n")
     logger.info("Installed hooks in %s", CLAUDE_SETTINGS_PATH)

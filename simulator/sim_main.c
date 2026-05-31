@@ -229,6 +229,7 @@ static int parse_v2_anim_name(const char *name) {
     if (strcmp(name, "confused") == 0)   return CLAWD_ANIM_CONFUSED;
     if (strcmp(name, "dizzy") == 0)      return CLAWD_ANIM_DIZZY;
     if (strcmp(name, "idle") == 0)       return CLAWD_ANIM_IDLE;
+    if (strcmp(name, "alert") == 0)      return CLAWD_ANIM_ALERT;
     return -1;
 }
 

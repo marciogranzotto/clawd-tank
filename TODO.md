@@ -24,6 +24,35 @@ Custom app icon. Proactive BLE reconnection with full state sync on disconnect.
 
 ---
 
+## Code-review hardening (attention-hooks branch) — Complete
+
+Multi-agent review of the attention-hooks work surfaced 15 findings; fixes:
+
+- [x] **Don't staleness-evict `waiting` sessions** — a session blocked on AskUserQuestion/
+  PermissionRequest emits no events, so time-based eviction wrongly dropped the alert
+  while the user was away. Now excluded from staleness eviction; PID-liveness still
+  evicts a dead Claude process.
+- [x] **Installer self-heals / prunes superseded groups** — `install_hooks()` now drops our
+  OWN prior hook groups before re-appending the current config, so a changed matcher
+  no longer leaves a stale wildcard group firing on every tool. `are_hooks_installed()`
+  reports outdated when a leftover our-group sits under an unexpected matcher.
+- [x] **Installer crash-guard + precise command match** — tolerates malformed `{"hooks": null}`
+  groups (no TypeError); matches our notify command by exact-path/prefix, not substring
+  (a user wrapper containing the path is no longer mistaken for ours).
+- [x] **`waiting` outranks subagents** — a session with active subagents that hits a
+  permission/question prompt now shows the alert instead of being masked by `conducting`.
+- [x] **No phantom resurrection** — `permission`/`tool_failed` no longer create a missing
+  session (matches `tool_done`), so a late event after SessionEnd can't revive a ghost.
+- [x] **v1 alert priority** — on v1 transports `alert` (needs-you) now outranks working/
+  thinking instead of being buried.
+- [x] **Cleanup** — shared `ASK_USER_QUESTION_TOOL` constant (single source of truth),
+  `_enter_state` helper removes the copy-paste state branches, `sim_main.c` `--capture-anim`
+  learns `alert`, and a cross-validation test guards NOTIFY_SCRIPT↔protocol.py drift.
+- Verified NOT defects / accepted limitations: the `alert` sprite loops seamlessly
+  (frame 39 ≈ frame 0 — captured and checked), so no firmware change; a PermissionRequest
+  alert may persist into the approved tool's run (no "granted" hook exists in Claude Code);
+  `tool_failed` intentionally reuses the `confused` animation.
+
 ## "Waiting for input" alert + PostToolUse — Complete
 
 - [x] **AskUserQuestion → waiting/alert** — When Claude shows the multiple-choice

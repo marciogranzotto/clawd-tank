@@ -32,11 +32,18 @@ def _read(settings_path) -> dict:
 
 
 def _commands_for(settings: dict, event: str) -> list[str]:
-    """Flatten every hook command registered for an event across all groups."""
+    """Flatten every hook command registered for an event across all groups.
+
+    Tolerates malformed groups (e.g. a user's {"hooks": null}) the installer leaves
+    untouched."""
     cmds = []
     for group in settings.get("hooks", {}).get(event, []):
-        for h in group.get("hooks", []):
-            cmds.append(h.get("command", ""))
+        hooks_list = group.get("hooks") if isinstance(group, dict) else None
+        if not isinstance(hooks_list, list):
+            continue
+        for h in hooks_list:
+            if isinstance(h, dict):
+                cmds.append(h.get("command", ""))
     return cmds
 
 
@@ -190,3 +197,89 @@ def test_are_hooks_installed_matcher_aware(settings_path):
 def test_are_hooks_installed_false_on_empty_settings(settings_path):
     settings_path.write_text(json.dumps({}))
     assert are_hooks_installed() is False
+
+
+# --- Pruning superseded groups / self-heal (matcher changes) ---
+
+
+def test_install_prunes_stale_our_group_on_matcher_change(settings_path):
+    """An older install registered PostToolUse with NO matcher; the current config
+    scopes it to AskUserQuestion. Install must drop the stale wildcard group, not
+    leave it firing the notify script on every tool."""
+    settings_path.write_text(json.dumps({
+        "hooks": {
+            "PostToolUse": [
+                {"hooks": [{"type": "command", "command": HOOK_COMMAND}]}  # stale, no matcher
+            ]
+        }
+    }))
+    install_hooks()
+    groups = _read(settings_path)["hooks"]["PostToolUse"]
+    our_groups = [g for g in groups
+                  if any(HOOK_COMMAND in h.get("command", "") for h in g.get("hooks", []))]
+    assert len(our_groups) == 1, "stale wildcard PostToolUse group was not pruned"
+    assert our_groups[0].get("matcher") == "AskUserQuestion"
+
+
+def test_are_hooks_installed_false_on_stale_our_group(settings_path):
+    """A leftover our-exclusive group under an unexpected matcher must read as outdated
+    so the startup auto-update re-runs install and cleans it up."""
+    install_hooks()
+    settings = _read(settings_path)
+    settings["hooks"]["PostToolUse"].append(
+        {"matcher": "Bash", "hooks": [{"type": "command", "command": HOOK_COMMAND}]}
+    )
+    settings_path.write_text(json.dumps(settings))
+    assert are_hooks_installed() is False
+
+
+def test_install_self_heals_stale_group(settings_path):
+    install_hooks()
+    settings = _read(settings_path)
+    settings["hooks"]["PostToolUse"].append(
+        {"matcher": "Bash", "hooks": [{"type": "command", "command": HOOK_COMMAND}]}
+    )
+    settings_path.write_text(json.dumps(settings))
+    install_hooks()
+    groups = _read(settings_path)["hooks"]["PostToolUse"]
+    matchers = sorted(g.get("matcher") for g in groups
+                      if any(HOOK_COMMAND in h.get("command", "") for h in g["hooks"]))
+    assert matchers == ["AskUserQuestion"]
+    assert are_hooks_installed() is True
+
+
+# --- Robustness on malformed settings ---
+
+
+def test_install_does_not_crash_on_null_hooks_value(settings_path):
+    settings_path.write_text(json.dumps({
+        "hooks": {"SessionStart": [{"matcher": "X", "hooks": None}]}
+    }))
+    install_hooks()  # must not raise TypeError
+    assert any(HOOK_COMMAND in c for c in _commands_for(_read(settings_path), "SessionStart"))
+
+
+def test_are_hooks_installed_does_not_crash_on_null_hooks_value(settings_path):
+    settings_path.write_text(json.dumps({
+        "hooks": {"SessionStart": [{"hooks": None}]}
+    }))
+    assert are_hooks_installed() is False  # must not raise
+
+
+# --- Precise command matching (no substring false positives) ---
+
+
+def test_install_not_fooled_by_substring_command(settings_path):
+    """A user command that merely contains the notify path (a wrapper, a cat) is not
+    'our' hook, so our real bare-command group must still be added."""
+    settings_path.write_text(json.dumps({
+        "hooks": {
+            "SessionStart": [
+                {"hooks": [{"type": "command", "command": "/bin/cat " + HOOK_COMMAND}]}
+            ]
+        }
+    }))
+    install_hooks()
+    cmds = _commands_for(_read(settings_path), "SessionStart")
+    assert "/bin/cat " + HOOK_COMMAND in cmds, "user's command was clobbered"
+    assert any(c == HOOK_COMMAND for c in cmds), "our real hook was not added"
