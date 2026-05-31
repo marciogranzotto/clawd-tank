@@ -22,13 +22,55 @@ NOTIFY_SCRIPT = textwrap.dedent('''\
     Reads hook payload from stdin, converts it to a daemon message,
     and forwards it via Unix socket. No external dependencies.
     """
+    # NOTIFY_SCRIPT_VERSION: 2026-05-16-pid-tracking
 
     import json
+    import os
+    import re
     import socket
+    import subprocess
     import sys
     from pathlib import Path
 
-    SOCKET_PATH = str(Path.home() / ".clawd-tank" / "sock")
+    SOCKET_PATH = os.environ.get(
+        "CLAWD_TANK_SOCKET",
+        str(Path.home() / ".clawd-tank" / "sock"),
+    )
+
+    _CLAUDE_ARGV_RE = re.compile(r"(^|/)claude($|\\s)")
+
+
+    def _ps(field, pid):
+        """Run `ps -o <field>= -p <pid>`, return trimmed stdout. Empty on error."""
+        try:
+            r = subprocess.run(
+                ["ps", "-o", field + "=", "-p", str(pid)],
+                capture_output=True, text=True, timeout=1.0,
+            )
+            return r.stdout.strip()
+        except (subprocess.TimeoutExpired, OSError):
+            return ""
+
+
+    def _find_claude_pid():
+        """Walk from os.getppid() up the process tree to find the long-lived
+        Claude Code PID. Falls back to os.getppid() if no `claude` ancestor.
+
+        Mirrors clawd_tank_daemon/pid_resolver.py — keep in sync.
+        """
+        start = os.getppid()
+        pid = start
+        while pid > 1:
+            if _ps("comm", pid) == "claude":
+                return pid
+            if _CLAUDE_ARGV_RE.search(_ps("command", pid)):
+                return pid
+            ppid_str = _ps("ppid", pid)
+            try:
+                pid = int(ppid_str)
+            except ValueError:
+                break
+        return start
 
 
     def hook_to_message(hook):
@@ -37,30 +79,32 @@ NOTIFY_SCRIPT = textwrap.dedent('''\
         session_id = hook.get("session_id", "")
         cwd = hook.get("cwd", "")
         project = Path(cwd).name if cwd else ""
+        pid = _find_claude_pid()
 
         if event_name == "SessionStart":
-            return {"event": "session_start", "session_id": session_id, "project": project}
+            msg = {"event": "session_start", "session_id": session_id, "project": project, "pid": pid}
+            source = hook.get("source")
+            if source is not None:
+                msg["source"] = source
+            return msg
 
         if event_name == "PreToolUse":
-            return {"event": "tool_use", "session_id": session_id, "tool_name": hook.get("tool_name", ""), "project": project}
+            return {"event": "tool_use", "session_id": session_id, "tool_name": hook.get("tool_name", ""), "project": project, "pid": pid}
 
         if event_name == "PreCompact":
-            return {"event": "compact", "session_id": session_id}
+            return {"event": "compact", "session_id": session_id, "pid": pid}
 
         if event_name == "Stop":
-            cwd = hook.get("cwd", "")
-            project = Path(cwd).name if cwd else "unknown"
             return {
                 "event": "add",
                 "hook": "Stop",
                 "session_id": session_id,
                 "project": project or "unknown",
                 "message": "Waiting for input",
+                "pid": pid,
             }
 
         if event_name == "StopFailure":
-            cwd = hook.get("cwd", "")
-            project = Path(cwd).name if cwd else "unknown"
             message = hook.get("error", "") or hook.get("stop_reason", "") or "API error"
             return {
                 "event": "add",
@@ -68,32 +112,37 @@ NOTIFY_SCRIPT = textwrap.dedent('''\
                 "session_id": session_id,
                 "project": project or "unknown",
                 "message": message,
+                "pid": pid,
             }
 
         if event_name == "Notification":
             if hook.get("notification_type") != "idle_prompt":
                 return None
-            cwd = hook.get("cwd", "")
-            project = Path(cwd).name if cwd else "unknown"
             return {
                 "event": "add",
                 "hook": "Notification",
                 "session_id": session_id,
                 "project": project or "unknown",
                 "message": hook.get("message", "Waiting for input"),
+                "pid": pid,
             }
 
         if event_name == "UserPromptSubmit":
-            return {"event": "dismiss", "hook": "UserPromptSubmit", "session_id": session_id}
+            return {"event": "dismiss", "hook": "UserPromptSubmit", "session_id": session_id, "pid": pid}
 
         if event_name == "SessionEnd":
-            return {"event": "dismiss", "hook": "SessionEnd", "session_id": session_id}
+            msg = {"event": "dismiss", "hook": "SessionEnd", "session_id": session_id, "pid": pid}
+            reason = hook.get("reason")
+            if reason is not None:
+                msg["reason"] = reason
+            return msg
 
         if event_name == "SubagentStart":
             return {
                 "event": "subagent_start",
                 "session_id": session_id,
                 "agent_id": hook.get("agent_id", ""),
+                "pid": pid,
             }
 
         if event_name == "SubagentStop":
@@ -101,6 +150,7 @@ NOTIFY_SCRIPT = textwrap.dedent('''\
                 "event": "subagent_stop",
                 "session_id": session_id,
                 "agent_id": hook.get("agent_id", ""),
+                "pid": pid,
             }
 
         return None

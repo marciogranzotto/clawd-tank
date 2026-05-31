@@ -169,3 +169,45 @@ def test_session_order_default_empty(tmp_path):
     _, order, next_id = load_sessions(path)
     assert order == [("s1", 1)]
     assert next_id == 2
+
+
+# --- PID handling (ghost-crab fix) ---
+
+
+def test_save_persists_pid_field(tmp_path):
+    """pid is part of the persisted session state."""
+    path = tmp_path / "sessions.json"
+    save_sessions({"s1": {"state": "idle", "last_event": 1.0, "pid": 4242}}, path)
+    raw = json.loads(path.read_text())
+    assert raw["sessions"]["s1"]["pid"] == 4242
+
+
+def test_load_drops_pid_field(tmp_path):
+    """Stored PIDs are unsafe across restart — load returns entries without pid."""
+    path = tmp_path / "sessions.json"
+    path.write_text(json.dumps({
+        "sessions": {"s1": {"state": "idle", "last_event": 1.0, "pid": 4242}},
+    }))
+    loaded, _, _ = load_sessions(path)
+    assert "s1" in loaded
+    assert "pid" not in loaded["s1"]
+
+
+def test_save_excludes_last_event_monotonic(tmp_path):
+    """last_event_monotonic is in-memory only; never persisted."""
+    path = tmp_path / "sessions.json"
+    save_sessions({"s1": {
+        "state": "idle", "last_event": 1.0, "last_event_monotonic": 12345.6,
+    }}, path)
+    raw = json.loads(path.read_text())
+    assert "last_event_monotonic" not in raw["sessions"]["s1"]
+
+
+def test_load_ignores_persisted_monotonic_if_present(tmp_path):
+    """Defensive: even if last_event_monotonic somehow got persisted, drop it on load."""
+    path = tmp_path / "sessions.json"
+    path.write_text(json.dumps({
+        "sessions": {"s1": {"state": "idle", "last_event": 1.0, "last_event_monotonic": 99.0}},
+    }))
+    loaded, _, _ = load_sessions(path)
+    assert "last_event_monotonic" not in loaded["s1"]

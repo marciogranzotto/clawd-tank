@@ -178,14 +178,22 @@ async def test_last_display_state_tracks_changes():
 
 def test_staleness_evicts_old_sessions():
     d = make_daemon()
-    d._session_states["s1"] = {"state": "idle", "last_event": time.time() - 9999}
+    d._session_states["s1"] = {
+        "state": "idle",
+        "last_event": time.time() - 9999,
+        "last_event_monotonic": time.monotonic() - 9999,
+    }
     d._session_staleness_timeout = 1
     d._evict_stale_sessions()
     assert "s1" not in d._session_states
 
 def test_staleness_keeps_fresh_sessions():
     d = make_daemon()
-    d._session_states["s1"] = {"state": "idle", "last_event": time.time()}
+    d._session_states["s1"] = {
+        "state": "idle",
+        "last_event": time.time(),
+        "last_event_monotonic": time.monotonic(),
+    }
     d._session_staleness_timeout = 600
     d._evict_stale_sessions()
     assert "s1" in d._session_states
@@ -282,13 +290,14 @@ async def test_subagent_start_with_empty_agent_id_ignored():
 # --- Task 4 / Task 5: eviction suppression and subagent display state ---
 
 def test_staleness_evicts_sessions_with_dead_subagents():
-    """Stale sessions are evicted even if subagents exist — stale last_event
+    """Stale sessions are evicted even if subagents exist — stale last_event_monotonic
     means subagent tool calls stopped refreshing it, so they're dead."""
     d = make_daemon()
     d._session_staleness_timeout = 1
     d._session_states["s1"] = {
         "state": "idle",
         "last_event": time.time() - 9999,
+        "last_event_monotonic": time.monotonic() - 9999,
         "subagents": {"a1"},
     }
     d._evict_stale_sessions()
@@ -297,12 +306,13 @@ def test_staleness_evicts_sessions_with_dead_subagents():
 
 def test_staleness_keeps_sessions_with_active_subagents():
     """Sessions with active subagents stay alive because subagent tool calls
-    refresh last_event via PreToolUse on the parent session."""
+    refresh last_event_monotonic via PreToolUse on the parent session."""
     d = make_daemon()
     d._session_staleness_timeout = 600
     d._session_states["s1"] = {
         "state": "idle",
         "last_event": time.time(),  # fresh — subagent is active
+        "last_event_monotonic": time.monotonic(),
         "subagents": {"a1"},
     }
     d._evict_stale_sessions()
@@ -417,6 +427,7 @@ async def test_subagent_lifecycle():
 
     # Staleness eviction works normally
     d._session_states["s1"]["last_event"] = time.time() - 9999
+    d._session_states["s1"]["last_event_monotonic"] = time.monotonic() - 9999
     d._evict_stale_sessions()
     assert "s1" not in d._session_states
     assert d._compute_display_state() == {"status": "sleeping"}
@@ -424,12 +435,13 @@ async def test_subagent_lifecycle():
 
 @pytest.mark.asyncio
 async def test_stale_subagents_evicted_with_session():
-    """Missed SubagentStop hooks don't prevent eviction — if last_event is
+    """Missed SubagentStop hooks don't prevent eviction — if last_event_monotonic is
     stale, subagent tool calls stopped refreshing it, so they're dead."""
     d = make_daemon()
     d._session_staleness_timeout = 1
     d._session_states["s1"] = {
         "state": "idle", "last_event": time.time() - 9999,
+        "last_event_monotonic": time.monotonic() - 9999,
         "subagents": {"orphan1", "orphan2"},
     }
     d._evict_stale_sessions()
@@ -487,7 +499,11 @@ async def test_daemon_persists_on_state_transition(tmp_path):
 def test_daemon_persists_on_eviction(tmp_path):
     path = tmp_path / "sessions.json"
     d = make_daemon_with_path(path)
-    d._session_states["s1"] = {"state": "idle", "last_event": time.time() - 9999}
+    d._session_states["s1"] = {
+        "state": "idle",
+        "last_event": time.time() - 9999,
+        "last_event_monotonic": time.monotonic() - 9999,
+    }
     d._session_staleness_timeout = 1
     d._evict_stale_sessions()
     data = json.loads(path.read_text())
@@ -831,7 +847,11 @@ async def test_error_state_removed_on_session_end():
 def test_error_state_evicted_on_staleness():
     d = make_daemon()
     d._session_staleness_timeout = 1
-    d._session_states["s1"] = {"state": "error", "last_event": time.time() - 9999}
+    d._session_states["s1"] = {
+        "state": "error",
+        "last_event": time.time() - 9999,
+        "last_event_monotonic": time.monotonic() - 9999,
+    }
     d._evict_stale_sessions()
     assert "s1" not in d._session_states
 
@@ -994,3 +1014,297 @@ def test_single_idle_session_with_notification_stays_idle():
     d._active_notifications["s1"] = {"event": "add", "session_id": "s1"}
     state = d._compute_display_state()
     assert state["anims"] == ["idle"]
+
+
+# --- PID + monotonic tracking (ghost-crab fix) ---
+
+@pytest.mark.asyncio
+async def test_session_start_stamps_pid_and_monotonic():
+    d = make_daemon()
+    await d._handle_message({
+        "event": "session_start", "session_id": "s1", "pid": 4242,
+    })
+    assert d._session_states["s1"]["pid"] == 4242
+    assert "last_event_monotonic" in d._session_states["s1"]
+    assert isinstance(d._session_states["s1"]["last_event_monotonic"], float)
+
+
+@pytest.mark.asyncio
+async def test_tool_use_refreshes_pid_and_monotonic():
+    d = make_daemon()
+    d._session_states["s1"] = {
+        "state": "working", "last_event": 1.0,
+        "pid": 1111, "last_event_monotonic": 0.0,
+    }
+    await d._handle_message({
+        "event": "tool_use", "session_id": "s1", "tool_name": "Edit", "pid": 4242,
+    })
+    assert d._session_states["s1"]["pid"] == 4242
+    assert d._session_states["s1"]["last_event_monotonic"] > 0.0
+
+
+@pytest.mark.asyncio
+async def test_message_without_pid_field_does_not_crash():
+    """Backwards-compat: old notify script sends no pid; daemon must cope."""
+    d = make_daemon()
+    await d._handle_message({"event": "session_start", "session_id": "s1"})
+    assert "s1" in d._session_states
+    # pid should be None (or absent) — explicit absence, not error
+    assert d._session_states["s1"].get("pid") is None
+
+
+def test_init_stamps_monotonic_on_loaded_sessions(tmp_path):
+    """After daemon restart, loaded sessions get fresh last_event_monotonic."""
+    from clawd_tank_daemon.session_store import save_sessions
+    sessions_path = tmp_path / "sessions.json"
+    save_sessions({"s1": {"state": "idle", "last_event": time.time()}}, sessions_path)
+
+    from clawd_tank_daemon.daemon import ClawdDaemon
+    d = ClawdDaemon(sim_only=True, sessions_path=sessions_path)
+    d._transports.clear()
+    d._transport_queues.clear()
+
+    assert "s1" in d._session_states
+    assert "last_event_monotonic" in d._session_states["s1"]
+    assert isinstance(d._session_states["s1"]["last_event_monotonic"], float)
+
+
+def test_init_prunes_wall_clock_stale_sessions(tmp_path):
+    """Startup prune: sessions with wall-clock last_event older than 10min
+    are removed at init (their Claude Code process is almost certainly dead)."""
+    from clawd_tank_daemon.session_store import save_sessions
+    sessions_path = tmp_path / "sessions.json"
+    save_sessions(
+        {
+            "fresh": {"state": "idle", "last_event": time.time()},
+            "stale": {"state": "idle", "last_event": time.time() - 3600},  # 1h ago
+        },
+        sessions_path,
+        order=[("fresh", 1), ("stale", 2)],
+        next_id=3,
+    )
+
+    from clawd_tank_daemon.daemon import ClawdDaemon
+    d = ClawdDaemon(sim_only=True, sessions_path=sessions_path)
+    d._transports.clear()
+    d._transport_queues.clear()
+
+    assert "fresh" in d._session_states
+    assert "stale" not in d._session_states
+    assert d._session_order == [("fresh", 1)]
+
+
+# --- Task 7: monotonic-based staleness eviction ---
+
+
+def test_staleness_uses_monotonic_not_wall_clock():
+    """A session with old wall-clock last_event but fresh monotonic time
+    should NOT be evicted — covers macOS sleep/wake scenario."""
+    d = make_daemon()
+    d._session_states["s1"] = {
+        "state": "idle",
+        "last_event": time.time() - 9999,            # ancient wall clock
+        "last_event_monotonic": time.monotonic(),    # but fresh monotonic
+    }
+    d._session_staleness_timeout = 600
+    d._evict_stale_sessions()
+    assert "s1" in d._session_states, "monotonic-fresh session evicted incorrectly"
+
+
+def test_staleness_evicts_when_monotonic_old():
+    """Session with old monotonic time is evicted regardless of wall clock."""
+    d = make_daemon()
+    d._session_states["s1"] = {
+        "state": "idle",
+        "last_event": time.time(),
+        "last_event_monotonic": time.monotonic() - 9999,
+    }
+    d._session_staleness_timeout = 1
+    d._evict_stale_sessions()
+    assert "s1" not in d._session_states
+
+
+# --- PID-based /clear dedup (ghost-crab fix) ---
+
+@pytest.mark.asyncio
+async def test_session_start_evicts_prior_session_with_same_pid_recent():
+    """SessionStart with PID that matches a recently-active session = /clear case.
+    Old session is evicted in the same _handle_message call."""
+    d = make_daemon()
+    d._session_states["old"] = {
+        "state": "idle",
+        "last_event": time.time(),
+        "last_event_monotonic": time.monotonic(),  # very recent
+        "pid": 4242,
+    }
+    d._session_order = [("old", 1)]
+    d._next_display_id = 2
+
+    await d._handle_message({"event": "session_start", "session_id": "new", "pid": 4242})
+
+    assert "old" not in d._session_states, "/clear dedup did not evict old session"
+    assert "new" in d._session_states
+    assert d._session_order == [("new", 2)], "session_order not scrubbed/updated"
+
+
+@pytest.mark.asyncio
+async def test_session_start_does_NOT_evict_stale_session_with_same_pid():
+    """If the matching session is >60s old (monotonic), assume PID recycle, no eviction."""
+    d = make_daemon()
+    d._session_states["old"] = {
+        "state": "idle",
+        "last_event": time.time(),
+        "last_event_monotonic": time.monotonic() - 120,  # 2 min old
+        "pid": 4242,
+    }
+    d._session_order = [("old", 1)]
+    d._next_display_id = 2
+
+    await d._handle_message({"event": "session_start", "session_id": "new", "pid": 4242})
+
+    assert "old" in d._session_states, "PID-recycle dedup wrongly evicted stale session"
+    assert "new" in d._session_states
+
+
+@pytest.mark.asyncio
+async def test_session_start_without_pid_does_not_dedup():
+    """Backwards-compat: old notify script sends no pid; dedup is skipped safely."""
+    d = make_daemon()
+    d._session_states["old"] = {
+        "state": "idle",
+        "last_event": time.time(),
+        "last_event_monotonic": time.monotonic(),
+        "pid": 4242,
+    }
+    d._session_order = [("old", 1)]
+    d._next_display_id = 2
+
+    await d._handle_message({"event": "session_start", "session_id": "new"})  # no pid
+
+    assert "old" in d._session_states
+    assert "new" in d._session_states
+
+
+@pytest.mark.asyncio
+async def test_dedup_scrubs_active_notifications():
+    """Evicted session's notification card is also removed."""
+    d = make_daemon()
+    d._session_states["old"] = {
+        "state": "idle",
+        "last_event": time.time(),
+        "last_event_monotonic": time.monotonic(),
+        "pid": 4242,
+    }
+    d._active_notifications["old"] = {"event": "add", "session_id": "old"}
+    d._session_order = [("old", 1)]
+    d._next_display_id = 2
+
+    await d._handle_message({"event": "session_start", "session_id": "new", "pid": 4242})
+
+    assert "old" not in d._active_notifications
+
+
+@pytest.mark.asyncio
+async def test_dedup_only_fires_on_session_start():
+    """A tool_use event with matching PID does NOT trigger dedup."""
+    d = make_daemon()
+    d._session_states["old"] = {
+        "state": "idle",
+        "last_event": time.time(),
+        "last_event_monotonic": time.monotonic(),
+        "pid": 4242,
+    }
+    d._session_order = [("old", 1)]
+    d._next_display_id = 2
+
+    await d._handle_message({"event": "tool_use", "session_id": "new", "pid": 4242, "tool_name": "Edit"})
+
+    assert "old" in d._session_states
+    assert "new" in d._session_states
+
+
+# --- Liveness polling (ghost-crab fix) ---
+
+def test_liveness_evicts_dead_pid():
+    """Session whose stored PID raises ProcessLookupError on kill(pid, 0) is evicted."""
+    from unittest.mock import patch
+    d = make_daemon()
+    d._session_states["s1"] = {
+        "state": "idle", "last_event": time.time(),
+        "last_event_monotonic": time.monotonic(), "pid": 4242,
+    }
+    d._session_order = [("s1", 1)]
+
+    with patch("clawd_tank_daemon.daemon.os.kill", side_effect=ProcessLookupError):
+        d._check_liveness()
+
+    assert "s1" not in d._session_states
+    assert d._session_order == []
+
+
+def test_liveness_keeps_alive_pid():
+    """Session whose PID is alive (kill returns) stays."""
+    from unittest.mock import patch
+    d = make_daemon()
+    d._session_states["s1"] = {
+        "state": "idle", "last_event": time.time(),
+        "last_event_monotonic": time.monotonic(), "pid": 4242,
+    }
+
+    with patch("clawd_tank_daemon.daemon.os.kill", return_value=None):
+        d._check_liveness()
+
+    assert "s1" in d._session_states
+
+
+def test_liveness_skips_sessions_without_pid():
+    """No-pid sessions (e.g. post-restart, pre-first-event) are skipped, not evicted."""
+    from unittest.mock import patch
+    d = make_daemon()
+    d._session_states["s1"] = {
+        "state": "idle", "last_event": time.time(),
+        "last_event_monotonic": time.monotonic(),
+    }
+
+    with patch("clawd_tank_daemon.daemon.os.kill", side_effect=ProcessLookupError):
+        d._check_liveness()
+
+    assert "s1" in d._session_states
+
+
+def test_liveness_treats_permission_error_as_alive():
+    """If kill raises PermissionError (PID belongs to another user), assume alive."""
+    from unittest.mock import patch
+    d = make_daemon()
+    d._session_states["s1"] = {
+        "state": "idle", "last_event": time.time(),
+        "last_event_monotonic": time.monotonic(), "pid": 4242,
+    }
+
+    with patch("clawd_tank_daemon.daemon.os.kill", side_effect=PermissionError):
+        d._check_liveness()
+
+    assert "s1" in d._session_states
+
+
+def test_liveness_persists_after_eviction(tmp_path):
+    """After evicting a dead session, the persisted sessions.json reflects it."""
+    from unittest.mock import patch
+    from clawd_tank_daemon.daemon import ClawdDaemon
+
+    d = ClawdDaemon(sim_only=True, sessions_path=tmp_path / "sessions.json")
+    d._transports.clear()
+    d._transport_queues.clear()
+    d._session_states["s1"] = {
+        "state": "idle", "last_event": time.time(),
+        "last_event_monotonic": time.monotonic(), "pid": 4242,
+    }
+    d._session_order = [("s1", 1)]
+
+    with patch("clawd_tank_daemon.daemon.os.kill", side_effect=ProcessLookupError):
+        d._check_liveness()
+
+    # Persist file should not contain s1
+    import json as _json
+    raw = _json.loads((tmp_path / "sessions.json").read_text())
+    assert "s1" not in raw.get("sessions", {})

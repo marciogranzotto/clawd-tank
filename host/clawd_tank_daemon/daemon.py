@@ -44,6 +44,7 @@ def _tool_to_anim(tool_name: str) -> str:
 
 PID_PATH = Path.home() / ".clawd-tank" / "daemon.pid"
 LOCK_PATH = Path.home() / ".clawd-tank" / "daemon.lock"
+PID_DEDUP_FRESHNESS_SECONDS = 60.0
 
 
 @runtime_checkable
@@ -148,13 +149,30 @@ class ClawdDaemon:
         self._headless = headless
         self._sessions_path = sessions_path if sessions_path is not None else session_store.SESSIONS_PATH
         loaded_states, loaded_order, loaded_next_id = load_sessions(self._sessions_path)
+
+        # One-shot startup prune by wall-clock: if last_event is older than the
+        # staleness timeout, the session almost certainly belongs to a dead Claude
+        # Code process from before the daemon restarted. After this prune we switch
+        # to monotonic time for runtime tracking (survives macOS sleep/wake).
+        now_wall = time.time()
+        stale_ids = [
+            sid for sid, s in loaded_states.items()
+            if now_wall - s.get("last_event", now_wall) > 600.0  # default timeout
+        ]
+        for sid in stale_ids:
+            del loaded_states[sid]
+        loaded_order = [(sid, did) for sid, did in loaded_order if sid not in stale_ids]
+
+        now_mono = time.monotonic()
+        for state in loaded_states.values():
+            state["last_event_monotonic"] = now_mono
         self._session_states: dict[str, dict] = loaded_states
         self._session_order: list[tuple[str, int]] = loaded_order
         self._next_display_id: int = loaded_next_id
         self._last_display_state: dict = {"status": "sleeping"}
         self._transport_versions: dict[str, int] = {}  # transport_name → protocol version
         self._session_staleness_timeout: float = 600.0
-        self._evict_stale_sessions()
+        # _evict_stale_sessions() removed — Task 6 startup prune covers this.
 
     async def _handle_message(self, msg: dict) -> None:
         """Handle a message from clawd-tank-notify via the socket."""
@@ -176,6 +194,12 @@ class ClawdDaemon:
             extra = f" agent={msg.get('agent_id', '?')[:12]}"
         elif event == "add":
             extra = f" msg={msg.get('message', '')[:30]}"
+        if msg.get("source"):
+            extra += f" source={msg['source']}"
+        if msg.get("reason"):
+            extra += f" reason={msg['reason']}"
+        if msg.get("pid"):
+            extra += f" pid={msg['pid']}"
         session_project = ""
         if session_id:
             s = self._session_states.get(session_id)
@@ -191,7 +215,34 @@ class ClawdDaemon:
         elif event == "dismiss":
             self._active_notifications.pop(session_id, None)
 
-        changed = self._update_session_state(event, hook, session_id, msg.get("agent_id", ""), msg.get("tool_name", ""))
+        # --- PID-based dedup: SessionStart with PID matching a recent session = /clear ---
+        if event == "session_start":
+            incoming_pid = msg.get("pid")
+            if incoming_pid is not None:
+                now_mono = time.monotonic()
+                to_evict = []
+                for sid, state in self._session_states.items():
+                    if sid == session_id:
+                        continue
+                    if state.get("pid") != incoming_pid:
+                        continue
+                    last_mono = state.get("last_event_monotonic", now_mono)
+                    if now_mono - last_mono < PID_DEDUP_FRESHNESS_SECONDS:
+                        to_evict.append(sid)
+                for sid in to_evict:
+                    logger.info(
+                        "PID dedup: evicting session %s (PID %d reused by new session %s)",
+                        sid[:12], incoming_pid, session_id[:12],
+                    )
+                    del self._session_states[sid]
+                    self._session_order = [(s, d) for s, d in self._session_order if s != sid]
+                    self._active_notifications.pop(sid, None)
+
+        changed = self._update_session_state(
+            event, hook, session_id,
+            msg.get("agent_id", ""), msg.get("tool_name", ""),
+            pid=msg.get("pid"),
+        )
 
         # Store project name after session state is created
         if project and session_id and session_id in self._session_states:
@@ -282,7 +333,10 @@ class ClawdDaemon:
             result["overflow"] = len(self._session_order) - 4
         return result
 
-    def _update_session_state(self, event: str, hook: str, session_id: str, agent_id: str = "", tool_name: str = "") -> bool:
+    def _update_session_state(
+        self, event: str, hook: str, session_id: str,
+        agent_id: str = "", tool_name: str = "", pid: Optional[int] = None,
+    ) -> bool:
         """Update per-session state based on a received event.
 
         Returns True if session state or subagents changed structurally
@@ -291,6 +345,7 @@ class ClawdDaemon:
         if not session_id:
             return False
         now = time.time()
+        now_mono = time.monotonic()
         prev = self._session_states.get(session_id)
         prev_state = prev["state"] if prev else None
         prev_subagents = prev.get("subagents", set()).copy() if prev else None
@@ -345,21 +400,30 @@ class ClawdDaemon:
             self._session_order.append((session_id, self._next_display_id))
             self._next_display_id += 1
 
+        # Stamp PID + monotonic on every event (only if session still exists —
+        # SessionEnd may have just removed it).
+        if cur is not None:
+            if pid is not None:
+                cur["pid"] = pid
+            cur["last_event_monotonic"] = now_mono
+
         if cur is None:
             return prev is not None  # session was removed
         return cur["state"] != prev_state or cur.get("subagents", set()) != (prev_subagents or set())
 
     def _evict_stale_sessions(self) -> None:
         # Active subagents refresh last_event via PreToolUse on the parent session.
-        # If last_event is stale, subagents are dead too — safe to evict.
-        now = time.time()
+        # If last_event_monotonic is stale, subagents are dead too — safe to evict.
+        # Uses monotonic time so macOS sleep doesn't trigger mass-eviction on wake.
+        now_mono = time.monotonic()
         stale = [
             sid for sid, s in self._session_states.items()
-            if now - s["last_event"] > self._session_staleness_timeout
+            if now_mono - s.get("last_event_monotonic", now_mono) > self._session_staleness_timeout
         ]
         for sid in stale:
             logger.info("Evicting stale session: %s", sid[:12])
             del self._session_states[sid]
+            self._active_notifications.pop(sid, None)
         if stale:
             self._session_order = [(sid, did) for sid, did in self._session_order if sid not in stale]
             self._persist_sessions()
@@ -398,6 +462,42 @@ class ClawdDaemon:
             await asyncio.sleep(30)
             self._evict_stale_sessions()
             await self._broadcast_display_state_if_changed()
+
+    def _check_liveness(self) -> list[str]:
+        """Synchronous half of the liveness check — separated for testability.
+
+        Returns the list of evicted session_ids.
+        """
+        dead = []
+        for sid, state in self._session_states.items():
+            pid = state.get("pid")
+            if pid is None:
+                continue
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                dead.append(sid)
+            except PermissionError:
+                pass  # PID belongs to another user — assume alive
+        for sid in dead:
+            logger.info(
+                "Liveness: evicting session %s (PID %d gone)",
+                sid[:12], self._session_states[sid].get("pid"),
+            )
+            del self._session_states[sid]
+            self._session_order = [(s, d) for s, d in self._session_order if s != sid]
+            self._active_notifications.pop(sid, None)
+        if dead:
+            self._persist_sessions()
+        return dead
+
+    async def _liveness_checker(self) -> None:
+        """Async task: every 30s, evict sessions whose Claude Code PID is gone."""
+        while self._running:
+            await asyncio.sleep(30)
+            evicted = self._check_liveness()
+            if evicted:
+                await self._broadcast_display_state_if_changed()
 
     def set_session_timeout(self, seconds: int) -> None:
         self._session_staleness_timeout = float(seconds)
@@ -528,6 +628,13 @@ class ClawdDaemon:
             except asyncio.CancelledError:
                 pass
 
+        if hasattr(self, '_liveness_task'):
+            self._liveness_task.cancel()
+            try:
+                await self._liveness_task
+            except asyncio.CancelledError:
+                pass
+
         for task in self._sender_tasks.values():
             task.cancel()
         for task in self._sender_tasks.values():
@@ -625,6 +732,7 @@ class ClawdDaemon:
             self._sender_tasks[name] = asyncio.create_task(self._transport_sender(name))
 
         self._staleness_task = asyncio.create_task(self._staleness_checker())
+        self._liveness_task = asyncio.create_task(self._liveness_checker())
 
         await self._shutdown_event.wait()
         logger.info("Daemon run() finished")

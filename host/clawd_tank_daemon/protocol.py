@@ -14,13 +14,19 @@ def hook_payload_to_daemon_message(hook: dict) -> Optional[dict]:
     session_id = hook.get("session_id", "")
     cwd = hook.get("cwd", "")
     project = Path(cwd).name if cwd else ""
+    pid = hook.get("pid")  # int or None; absent in older notify scripts
 
     if event_name == "SessionStart":
-        return {
+        msg = {
             "event": "session_start",
             "session_id": session_id,
             "project": project,
+            "pid": pid,
         }
+        source = hook.get("source")
+        if source is not None:
+            msg["source"] = source
+        return msg
 
     if event_name == "PreToolUse":
         return {
@@ -28,12 +34,14 @@ def hook_payload_to_daemon_message(hook: dict) -> Optional[dict]:
             "session_id": session_id,
             "tool_name": hook.get("tool_name", ""),
             "project": project,
+            "pid": pid,
         }
 
     if event_name == "PreCompact":
         return {
             "event": "compact",
             "session_id": session_id,
+            "pid": pid,
         }
 
     if event_name == "Stop":
@@ -47,6 +55,7 @@ def hook_payload_to_daemon_message(hook: dict) -> Optional[dict]:
             "session_id": session_id,
             "project": project,
             "message": "Waiting for input",
+            "pid": pid,
         }
 
     if event_name == "StopFailure":
@@ -61,6 +70,7 @@ def hook_payload_to_daemon_message(hook: dict) -> Optional[dict]:
             "session_id": session_id,
             "project": project,
             "message": message,
+            "pid": pid,
         }
 
     if event_name == "Notification":
@@ -77,6 +87,7 @@ def hook_payload_to_daemon_message(hook: dict) -> Optional[dict]:
             "session_id": session_id,
             "project": project,
             "message": message,
+            "pid": pid,
         }
 
     if event_name == "UserPromptSubmit":
@@ -84,20 +95,27 @@ def hook_payload_to_daemon_message(hook: dict) -> Optional[dict]:
             "event": "dismiss",
             "hook": "UserPromptSubmit",
             "session_id": session_id,
+            "pid": pid,
         }
 
     if event_name == "SessionEnd":
-        return {
+        msg = {
             "event": "dismiss",
             "hook": "SessionEnd",
             "session_id": session_id,
+            "pid": pid,
         }
+        reason = hook.get("reason")
+        if reason is not None:
+            msg["reason"] = reason
+        return msg
 
     if event_name == "SubagentStart":
         return {
             "event": "subagent_start",
             "session_id": session_id,
             "agent_id": hook.get("agent_id", ""),
+            "pid": pid,
         }
 
     if event_name == "SubagentStop":
@@ -105,6 +123,7 @@ def hook_payload_to_daemon_message(hook: dict) -> Optional[dict]:
             "event": "subagent_stop",
             "session_id": session_id,
             "agent_id": hook.get("agent_id", ""),
+            "pid": pid,
         }
 
     return None
