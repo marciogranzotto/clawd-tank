@@ -56,6 +56,7 @@ static void safe_strncpy(char *dst, const char *src, size_t n) {
 
 static int parse_anim_name(const char *str) {
     if (strcmp(str, "idle") == 0)     return CLAWD_ANIM_IDLE;
+    if (strcmp(str, "alert") == 0)    return CLAWD_ANIM_ALERT;
     if (strcmp(str, "typing") == 0)   return CLAWD_ANIM_TYPING;
     if (strcmp(str, "thinking") == 0) return CLAWD_ANIM_THINKING;
     if (strcmp(str, "building") == 0) return CLAWD_ANIM_BUILDING;

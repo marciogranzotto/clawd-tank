@@ -582,3 +582,66 @@ def test_subagent_start_includes_pid():
         "pid": 4242,
     })
     assert msg["pid"] == 4242
+
+
+# --- PostToolUse hook (AskUserQuestion "waiting for input" clearing) ---
+
+
+def test_post_tool_use_produces_tool_done():
+    hook = {
+        "hook_event_name": "PostToolUse",
+        "session_id": "sess-9",
+        "tool_name": "AskUserQuestion",
+    }
+    msg = hook_payload_to_daemon_message(hook)
+    assert msg is not None
+    assert msg["event"] == "tool_done"
+    assert msg["session_id"] == "sess-9"
+
+
+def test_post_tool_use_preserves_tool_name():
+    hook = {
+        "hook_event_name": "PostToolUse",
+        "session_id": "sess-9",
+        "tool_name": "AskUserQuestion",
+    }
+    msg = hook_payload_to_daemon_message(hook)
+    assert msg is not None
+    assert msg["tool_name"] == "AskUserQuestion"
+
+
+def test_post_tool_use_missing_tool_name_defaults_empty():
+    hook = {
+        "hook_event_name": "PostToolUse",
+        "session_id": "sess-9",
+    }
+    msg = hook_payload_to_daemon_message(hook)
+    assert msg is not None
+    assert msg["tool_name"] == ""
+
+
+def test_post_tool_use_includes_pid():
+    hook = {
+        "hook_event_name": "PostToolUse",
+        "session_id": "sess-9",
+        "tool_name": "AskUserQuestion",
+        "pid": 4242,
+    }
+    msg = hook_payload_to_daemon_message(hook)
+    assert msg is not None
+    assert msg["pid"] == 4242
+
+
+def test_tool_done_produces_no_ble_payload():
+    """tool_done is session-internal — has no BLE representation."""
+    assert daemon_message_to_ble_payload(
+        {"event": "tool_done", "session_id": "s", "tool_name": "AskUserQuestion"}
+    ) is None
+
+
+def test_display_state_to_v1_alert_maps_to_confused():
+    """The 'alert' (waiting-for-input) anim maps to v1 'confused' needs-attention status."""
+    state = {"anims": ["alert"], "ids": [1], "subagents": 0}
+    payload = display_state_to_v1_payload(state)
+    parsed = json.loads(payload)
+    assert parsed["status"] == "confused"

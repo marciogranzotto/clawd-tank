@@ -1,6 +1,7 @@
 # host/clawd_tank_menubar/hooks.py
 """Install the Claude Code hook script and configure hooks in settings."""
 
+import copy
 import json
 import logging
 import os
@@ -22,7 +23,7 @@ NOTIFY_SCRIPT = textwrap.dedent('''\
     Reads hook payload from stdin, converts it to a daemon message,
     and forwards it via Unix socket. No external dependencies.
     """
-    # NOTIFY_SCRIPT_VERSION: 2026-05-16-pid-tracking
+    # NOTIFY_SCRIPT_VERSION: 2026-05-30-posttooluse
 
     import json
     import os
@@ -90,6 +91,9 @@ NOTIFY_SCRIPT = textwrap.dedent('''\
 
         if event_name == "PreToolUse":
             return {"event": "tool_use", "session_id": session_id, "tool_name": hook.get("tool_name", ""), "project": project, "pid": pid}
+
+        if event_name == "PostToolUse":
+            return {"event": "tool_done", "session_id": session_id, "tool_name": hook.get("tool_name", ""), "project": project, "pid": pid}
 
         if event_name == "PreCompact":
             return {"event": "compact", "session_id": session_id, "pid": pid}
@@ -208,6 +212,15 @@ HOOKS_CONFIG = {
     "PreToolUse": [
         {"hooks": [{"type": "command", "command": HOOK_COMMAND}]}
     ],
+    # Scoped to AskUserQuestion only: the sole purpose is clearing the "waiting
+    # for input" alert when the user answers. Registering PostToolUse for every
+    # tool would double the device's event/BLE traffic for no added value.
+    "PostToolUse": [
+        {
+            "matcher": "AskUserQuestion",
+            "hooks": [{"type": "command", "command": HOOK_COMMAND}],
+        }
+    ],
     "PreCompact": [
         {"hooks": [{"type": "command", "command": HOOK_COMMAND}]}
     ],
@@ -231,33 +244,70 @@ def install_notify_script() -> None:
     logger.info("Installed hook script: %s", NOTIFY_SCRIPT_PATH)
 
 
+def _matcher_of(entry: dict):
+    """Normalised matcher of a hook group. Absent/empty matcher → None.
+
+    Claude Code treats a group with no matcher (or "") as matching everything,
+    so they are equivalent for the purpose of locating "our" group.
+    """
+    if not isinstance(entry, dict):
+        return None
+    matcher = entry.get("matcher")
+    return matcher if matcher else None
+
+
+def _group_runs_our_command(entry: dict) -> bool:
+    """True if a hook group contains a hook that runs the Clawd Tank notify script."""
+    if not isinstance(entry, dict):
+        return False
+    for h in entry.get("hooks", []):
+        if isinstance(h, dict) and HOOK_COMMAND in (h.get("command") or ""):
+            return True
+    return False
+
+
+def _our_hook_present(existing_entries, our_matcher) -> bool:
+    """True if some existing group with the same matcher already runs our command."""
+    if not isinstance(existing_entries, list):
+        return False
+    for entry in existing_entries:
+        if _matcher_of(entry) == our_matcher and _group_runs_our_command(entry):
+            return True
+    return False
+
+
 def are_hooks_installed() -> bool:
-    """Check if Claude Code settings have all required Clawd Tank hooks."""
+    """True only if every Clawd Tank hook (event + matcher) is already registered.
+
+    Matcher-aware: a hook whose command is present but under the wrong matcher
+    (e.g. a new matcher we started requiring) counts as NOT installed, so the
+    menu bar app treats it as outdated and re-runs install_hooks().
+    """
     if not CLAUDE_SETTINGS_PATH.exists():
         return False
     try:
         settings = json.loads(CLAUDE_SETTINGS_PATH.read_text())
-        hooks = settings.get("hooks", {})
-        # Every hook event in HOOKS_CONFIG must be present and point to our script
-        for event_name in HOOKS_CONFIG:
-            if event_name not in hooks:
-                return False
-            found = False
-            for entry in hooks[event_name]:
-                for h in entry.get("hooks", []):
-                    if HOOK_COMMAND in h.get("command", ""):
-                        found = True
-                        break
-            if not found:
-                return False
-        return True
     except (json.JSONDecodeError, OSError):
-        pass
-    return False
+        return False
+    if not isinstance(settings, dict):
+        return False
+    hooks = settings.get("hooks", {})
+    if not isinstance(hooks, dict):
+        return False
+    for event_name, our_entries in HOOKS_CONFIG.items():
+        existing = hooks.get(event_name, [])
+        for our_entry in our_entries:
+            if not _our_hook_present(existing, _matcher_of(our_entry)):
+                return False
+    return True
 
 
 def install_hooks() -> bool:
-    """Add Clawd Tank hooks to Claude Code settings. Returns True on success."""
+    """Merge Clawd Tank hooks into Claude Code settings without clobbering the
+    user's own hooks. Additive and idempotent: for each event+matcher we manage,
+    append our hook group only if it is not already registered. Existing groups —
+    including the user's — are never modified or removed. Returns True on success.
+    """
     CLAUDE_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     if CLAUDE_SETTINGS_PATH.exists():
@@ -267,9 +317,23 @@ def install_hooks() -> bool:
             settings = {}
     else:
         settings = {}
+    if not isinstance(settings, dict):
+        settings = {}
 
-    settings.setdefault("hooks", {})
-    settings["hooks"].update(HOOKS_CONFIG)
+    hooks = settings.get("hooks")
+    if not isinstance(hooks, dict):
+        hooks = {}
+        settings["hooks"] = hooks
+
+    for event_name, our_entries in HOOKS_CONFIG.items():
+        existing = hooks.get(event_name)
+        if not isinstance(existing, list):
+            existing = []
+            hooks[event_name] = existing
+        for our_entry in our_entries:
+            if _our_hook_present(existing, _matcher_of(our_entry)):
+                continue  # already registered — don't duplicate, don't touch theirs
+            existing.append(copy.deepcopy(our_entry))
 
     CLAUDE_SETTINGS_PATH.write_text(json.dumps(settings, indent=2) + "\n")
     logger.info("Installed hooks in %s", CLAUDE_SETTINGS_PATH)

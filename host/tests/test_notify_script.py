@@ -135,7 +135,21 @@ def test_notify_script_session_end_includes_reason(tmp_path):
 def test_notify_script_irrelevant_hook_sends_nothing(tmp_path):
     sock_path = _make_sock_path()
     msg = _run_script_with_payload({
-        "hook_event_name": "PostToolUse",  # not handled
+        "hook_event_name": "SomeUnhandledEvent",  # not handled
         "session_id": "s4",
     }, sock_path)
     assert msg == {}
+
+
+def test_notify_script_post_tool_use_produces_tool_done(tmp_path):
+    sock_path = _make_sock_path()
+    msg = _run_script_with_payload({
+        "hook_event_name": "PostToolUse",
+        "session_id": "s5",
+        "tool_name": "AskUserQuestion",
+        "cwd": str(tmp_path),
+    }, sock_path)
+    assert msg.get("event") == "tool_done"
+    assert msg.get("session_id") == "s5"
+    assert msg.get("tool_name") == "AskUserQuestion"
+    assert isinstance(msg.get("pid"), int)

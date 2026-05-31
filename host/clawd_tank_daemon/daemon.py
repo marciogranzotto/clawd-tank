@@ -188,7 +188,7 @@ class ClawdDaemon:
             pass
 
         extra = ""
-        if event == "tool_use":
+        if event in ("tool_use", "tool_done"):
             extra = f" tool={msg.get('tool_name', '?')}"
         elif event in ("subagent_start", "subagent_stop"):
             extra = f" agent={msg.get('agent_id', '?')[:12]}"
@@ -310,11 +310,12 @@ class ClawdDaemon:
                 continue
             session_subagents = state.get("subagents", set())
 
-            if state["state"] == "working" or session_subagents:
-                if session_subagents:
-                    anims.append("conducting")
-                else:
-                    anims.append(_tool_to_anim(state.get("tool_name", "")))
+            if session_subagents:
+                anims.append("conducting")
+            elif state["state"] == "working":
+                anims.append(_tool_to_anim(state.get("tool_name", "")))
+            elif state["state"] == "waiting":
+                anims.append("alert")
             elif state["state"] == "thinking":
                 anims.append("thinking")
             elif state["state"] == "confused":
@@ -353,10 +354,22 @@ class ClawdDaemon:
         if event == "session_start":
             self._session_states[session_id] = {"state": "registered", "last_event": now}
         elif event == "tool_use":
-            self._session_states.setdefault(session_id, {"state": "working", "last_event": now})
-            self._session_states[session_id]["state"] = "working"
+            # AskUserQuestion blocks on a human choice — surface it as a distinct
+            # "waiting" state (alert animation), not as ordinary work.
+            new_state = "waiting" if tool_name == "AskUserQuestion" else "working"
+            self._session_states.setdefault(session_id, {"state": new_state, "last_event": now})
+            self._session_states[session_id]["state"] = new_state
             self._session_states[session_id]["tool_name"] = tool_name
             self._session_states[session_id]["last_event"] = now
+        elif event == "tool_done":
+            # PostToolUse (registered scoped to AskUserQuestion): the user answered,
+            # so clear the waiting alert and let Claude resume thinking. Never creates
+            # a session — a PostToolUse with no prior PreToolUse is ignored.
+            cur_s = self._session_states.get(session_id)
+            if cur_s is not None:
+                if tool_name == "AskUserQuestion" and cur_s["state"] == "waiting":
+                    cur_s["state"] = "thinking"
+                cur_s["last_event"] = now
         elif event == "compact":
             if session_id in self._session_states:
                 self._session_states[session_id]["last_event"] = now

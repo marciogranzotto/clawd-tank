@@ -37,6 +37,15 @@ def hook_payload_to_daemon_message(hook: dict) -> Optional[dict]:
             "pid": pid,
         }
 
+    if event_name == "PostToolUse":
+        return {
+            "event": "tool_done",
+            "session_id": session_id,
+            "tool_name": hook.get("tool_name", ""),
+            "project": project,
+            "pid": pid,
+        }
+
     if event_name == "PreCompact":
         return {
             "event": "compact",
@@ -132,13 +141,13 @@ def hook_payload_to_daemon_message(hook: dict) -> Optional[dict]:
 def daemon_message_to_ble_payload(msg: dict) -> Optional[str]:
     """Convert a daemon message to a JSON string for BLE GATT write.
 
-    Returns None for session-internal events (session_start, tool_use, compact,
-    subagent_start, subagent_stop) that have no BLE representation.
+    Returns None for session-internal events (session_start, tool_use, tool_done,
+    compact, subagent_start, subagent_stop) that have no BLE representation.
     Raises ValueError for unknown events.
     """
     event = msg["event"]
 
-    if event in ("session_start", "tool_use", "compact", "subagent_start", "subagent_stop"):
+    if event in ("session_start", "tool_use", "tool_done", "compact", "subagent_start", "subagent_stop"):
         return None
 
     if event == "add":
@@ -182,7 +191,7 @@ def display_state_to_v1_payload(state: dict) -> str:
         status = f"working_{min(working, 3)}"
     elif "thinking" in state.get("anims", []):
         status = "thinking"
-    elif any(a in ("confused", "dizzy") for a in state.get("anims", [])):
+    elif any(a in ("confused", "dizzy", "alert") for a in state.get("anims", [])):
         status = "confused"
     else:
         status = "idle"

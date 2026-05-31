@@ -967,6 +967,100 @@ def test_subagent_override_trumps_tool_name():
     assert state["anims"] == ["conducting"]
 
 
+# --- AskUserQuestion → "waiting" state + alert animation ---
+
+
+@pytest.mark.asyncio
+async def test_ask_user_question_tool_use_sets_waiting():
+    """PreToolUse for AskUserQuestion is a 'blocked on the human' moment, not work."""
+    d = make_daemon()
+    d._session_states["s1"] = {"state": "working", "last_event": time.time()}
+    await d._handle_message({
+        "event": "tool_use", "session_id": "s1", "tool_name": "AskUserQuestion",
+    })
+    assert d._session_states["s1"]["state"] == "waiting"
+
+
+def test_waiting_session_returns_alert():
+    d = make_daemon()
+    _add_session(d, "s1", {"state": "waiting", "last_event": time.time()})
+    assert d._compute_display_state() == {"anims": ["alert"], "ids": [1], "subagents": 0}
+
+
+def test_waiting_and_working_mixed():
+    d = make_daemon()
+    _add_session(d, "s1", {"state": "waiting", "last_event": time.time()})
+    _add_session(d, "s2", {"state": "working", "last_event": time.time(), "tool_name": "Bash"})
+    state = d._compute_display_state()
+    assert state["anims"] == ["alert", "building"]
+
+
+@pytest.mark.asyncio
+async def test_tool_done_askuserquestion_clears_waiting_to_thinking():
+    """PostToolUse for AskUserQuestion means the user answered — Claude resumes thinking."""
+    d = make_daemon()
+    d._session_states["s1"] = {"state": "waiting", "last_event": time.time()}
+    await d._handle_message({
+        "event": "tool_done", "session_id": "s1", "tool_name": "AskUserQuestion",
+    })
+    assert d._session_states["s1"]["state"] == "thinking"
+
+
+@pytest.mark.asyncio
+async def test_tool_done_for_unknown_session_does_not_create_it():
+    """A PostToolUse with no prior session must not spawn a phantom session."""
+    d = make_daemon()
+    await d._handle_message({
+        "event": "tool_done", "session_id": "ghost", "tool_name": "AskUserQuestion",
+    })
+    assert "ghost" not in d._session_states
+
+
+@pytest.mark.asyncio
+async def test_tool_done_non_askuserquestion_leaves_state():
+    """tool_done for any other tool just refreshes liveness, never changes state."""
+    d = make_daemon()
+    d._session_states["s1"] = {"state": "working", "last_event": time.time()}
+    await d._handle_message({
+        "event": "tool_done", "session_id": "s1", "tool_name": "Bash",
+    })
+    assert d._session_states["s1"]["state"] == "working"
+
+
+@pytest.mark.asyncio
+async def test_waiting_clears_on_next_tool_use():
+    """If Claude proceeds to a real tool after asking, the alert clears to working."""
+    d = make_daemon()
+    d._session_states["s1"] = {"state": "waiting", "last_event": time.time()}
+    await d._handle_message({
+        "event": "tool_use", "session_id": "s1", "tool_name": "Edit",
+    })
+    assert d._session_states["s1"]["state"] == "working"
+
+
+def test_waiting_with_subagents_shows_conducting():
+    """Active subagents keep their established precedence over the waiting alert."""
+    d = make_daemon()
+    _add_session(d, "s1", {
+        "state": "waiting", "last_event": time.time(), "subagents": {"a1"},
+    })
+    state = d._compute_display_state()
+    assert state["anims"] == ["conducting"]
+
+
+@pytest.mark.asyncio
+async def test_tool_done_clearing_waiting_is_persisted(tmp_path):
+    """waiting → thinking is a structural change and must hit disk."""
+    path = tmp_path / "sessions.json"
+    d = make_daemon_with_path(path)
+    d._session_states["s1"] = {"state": "waiting", "last_event": time.time()}
+    await d._handle_message({
+        "event": "tool_done", "session_id": "s1", "tool_name": "AskUserQuestion",
+    })
+    data = json.loads(path.read_text())
+    assert data["sessions"]["s1"]["state"] == "thinking"
+
+
 def test_idle_session_keeps_own_anim_when_notifications_active():
     """Idle sessions keep their own animation even when notifications are present."""
     d = make_daemon()

@@ -24,6 +24,29 @@ Custom app icon. Proactive BLE reconnection with full state sync on disconnect.
 
 ---
 
+## "Waiting for input" alert + PostToolUse — Complete
+
+- [x] **AskUserQuestion → waiting/alert** — When Claude shows the multiple-choice
+  dialog (`AskUserQuestion` tool), its `PreToolUse` now maps to a distinct
+  `waiting` session state that renders the `alert` Clawd animation, instead of the
+  generic `typing` it shared with real work. Claude is blocked on the human, so it
+  now looks like it.
+- [x] **PostToolUse hook (scoped to AskUserQuestion)** — New `PostToolUse` hook,
+  registered with `matcher: "AskUserQuestion"` to keep device event/BLE traffic
+  minimal. Emits a `tool_done` daemon event that clears the `waiting` alert back to
+  `thinking` the moment the user answers. The daemon-side handler is generic, so the
+  matcher can be broadened later with zero code change.
+- [x] **`alert` anim string parsing** — Added `"alert"` → `CLAWD_ANIM_ALERT` to both
+  `ble_service.c` and `sim_ble_parse.c` `parse_anim_name()` (it was previously
+  unmapped). v1 transports map the `alert` anim to the `confused` needs-attention
+  status. Notify script version bumped to `2026-05-30-posttooluse` (auto-reinstalls).
+- [x] **Non-clobbering hook installer** — `install_hooks()` now MERGES our hooks into
+  the user's Claude Code settings instead of `dict.update()` replacing whole event
+  keys. For each event+matcher we manage, our hook group is appended only if absent;
+  the user's own hooks (and other settings keys) are never modified or removed.
+  Idempotent. `are_hooks_installed()` is now matcher-aware so a new/changed matcher is
+  correctly detected as outdated. (`tests/test_hooks_install.py`, 11 tests.)
+
 ## Working Animations (v1.1.0) — Complete
 
 - [x] **Session state tracking in daemon** — `dict[session_id → state]` with `_compute_display_state()` priority resolution. States: registered → thinking → working → idle → confused. Display priority: working_N > thinking > confused > idle > sleeping.
