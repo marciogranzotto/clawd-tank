@@ -187,6 +187,21 @@ def test_staleness_evicts_old_sessions():
     d._evict_stale_sessions()
     assert "s1" not in d._session_states
 
+def test_staleness_does_not_evict_waiting_session():
+    """A 'waiting' session is blocked on the human and legitimately emits no events;
+    time-based eviction would wrongly drop the alert while the user is away. The
+    PID-liveness checker still evicts it if the Claude process actually dies."""
+    d = make_daemon()
+    d._session_states["s1"] = {
+        "state": "waiting",
+        "last_event": time.time() - 9999,
+        "last_event_monotonic": time.monotonic() - 9999,
+    }
+    d._session_staleness_timeout = 1
+    d._evict_stale_sessions()
+    assert "s1" in d._session_states
+
+
 def test_staleness_keeps_fresh_sessions():
     d = make_daemon()
     d._session_states["s1"] = {
@@ -965,6 +980,186 @@ def test_subagent_override_trumps_tool_name():
     })
     state = d._compute_display_state()
     assert state["anims"] == ["conducting"]
+
+
+# --- AskUserQuestion → "waiting" state + alert animation ---
+
+
+@pytest.mark.asyncio
+async def test_ask_user_question_tool_use_sets_waiting():
+    """PreToolUse for AskUserQuestion is a 'blocked on the human' moment, not work."""
+    d = make_daemon()
+    d._session_states["s1"] = {"state": "working", "last_event": time.time()}
+    await d._handle_message({
+        "event": "tool_use", "session_id": "s1", "tool_name": "AskUserQuestion",
+    })
+    assert d._session_states["s1"]["state"] == "waiting"
+
+
+def test_waiting_session_returns_alert():
+    d = make_daemon()
+    _add_session(d, "s1", {"state": "waiting", "last_event": time.time()})
+    assert d._compute_display_state() == {"anims": ["alert"], "ids": [1], "subagents": 0}
+
+
+def test_waiting_and_working_mixed():
+    d = make_daemon()
+    _add_session(d, "s1", {"state": "waiting", "last_event": time.time()})
+    _add_session(d, "s2", {"state": "working", "last_event": time.time(), "tool_name": "Bash"})
+    state = d._compute_display_state()
+    assert state["anims"] == ["alert", "building"]
+
+
+@pytest.mark.asyncio
+async def test_tool_done_askuserquestion_clears_waiting_to_thinking():
+    """PostToolUse for AskUserQuestion means the user answered — Claude resumes thinking."""
+    d = make_daemon()
+    d._session_states["s1"] = {"state": "waiting", "last_event": time.time()}
+    await d._handle_message({
+        "event": "tool_done", "session_id": "s1", "tool_name": "AskUserQuestion",
+    })
+    assert d._session_states["s1"]["state"] == "thinking"
+
+
+@pytest.mark.asyncio
+async def test_tool_done_for_unknown_session_does_not_create_it():
+    """A PostToolUse with no prior session must not spawn a phantom session."""
+    d = make_daemon()
+    await d._handle_message({
+        "event": "tool_done", "session_id": "ghost", "tool_name": "AskUserQuestion",
+    })
+    assert "ghost" not in d._session_states
+
+
+@pytest.mark.asyncio
+async def test_tool_done_non_askuserquestion_leaves_state():
+    """tool_done for any other tool just refreshes liveness, never changes state."""
+    d = make_daemon()
+    d._session_states["s1"] = {"state": "working", "last_event": time.time()}
+    await d._handle_message({
+        "event": "tool_done", "session_id": "s1", "tool_name": "Bash",
+    })
+    assert d._session_states["s1"]["state"] == "working"
+
+
+@pytest.mark.asyncio
+async def test_waiting_clears_on_next_tool_use():
+    """If Claude proceeds to a real tool after asking, the alert clears to working."""
+    d = make_daemon()
+    d._session_states["s1"] = {"state": "waiting", "last_event": time.time()}
+    await d._handle_message({
+        "event": "tool_use", "session_id": "s1", "tool_name": "Edit",
+    })
+    assert d._session_states["s1"]["state"] == "working"
+
+
+def test_waiting_outranks_subagents():
+    """'needs you' is the most actionable signal, so the alert outranks the subagent
+    'conducting' indicator when a session with subagents is also blocked on the human."""
+    d = make_daemon()
+    _add_session(d, "s1", {
+        "state": "waiting", "last_event": time.time(), "subagents": {"a1"},
+    })
+    state = d._compute_display_state()
+    assert state["anims"] == ["alert"]
+
+
+def test_working_with_subagents_still_conducting():
+    """Regression: a non-waiting working session with subagents still shows conducting."""
+    d = make_daemon()
+    _add_session(d, "s1", {
+        "state": "working", "last_event": time.time(), "tool_name": "Read", "subagents": {"a1"},
+    })
+    assert d._compute_display_state()["anims"] == ["conducting"]
+
+
+@pytest.mark.asyncio
+async def test_tool_done_clearing_waiting_is_persisted(tmp_path):
+    """waiting → thinking is a structural change and must hit disk."""
+    path = tmp_path / "sessions.json"
+    d = make_daemon_with_path(path)
+    d._session_states["s1"] = {"state": "waiting", "last_event": time.time()}
+    await d._handle_message({
+        "event": "tool_done", "session_id": "s1", "tool_name": "AskUserQuestion",
+    })
+    data = json.loads(path.read_text())
+    assert data["sessions"]["s1"]["state"] == "thinking"
+
+
+# --- PermissionRequest → waiting/alert (blocked on the human's approval) ---
+
+
+@pytest.mark.asyncio
+async def test_permission_request_sets_waiting():
+    d = make_daemon()
+    d._session_states["s1"] = {"state": "working", "last_event": time.time(), "tool_name": "Bash"}
+    await d._handle_message({"event": "permission", "session_id": "s1", "tool_name": "Bash"})
+    assert d._session_states["s1"]["state"] == "waiting"
+
+
+@pytest.mark.asyncio
+async def test_permission_request_does_not_create_missing_session():
+    """A permission/tool_failed for an unknown session must NOT resurrect it (matches
+    tool_done). PreToolUse always precedes a real permission prompt."""
+    d = make_daemon()
+    await d._handle_message({"event": "permission", "session_id": "ghost", "tool_name": "Bash"})
+    assert "ghost" not in d._session_states
+
+
+@pytest.mark.asyncio
+async def test_permission_waiting_clears_on_next_tool_use():
+    """No 'granted' hook fires — approval is followed by the tool running, so the
+    alert clears on the next tool_use."""
+    d = make_daemon()
+    await d._handle_message({"event": "permission", "session_id": "s1", "tool_name": "Bash"})
+    await d._handle_message({"event": "tool_use", "session_id": "s1", "tool_name": "Bash"})
+    assert d._session_states["s1"]["state"] == "working"
+
+
+@pytest.mark.asyncio
+async def test_permission_waiting_clears_on_stop():
+    d = make_daemon()
+    await d._handle_message({"event": "permission", "session_id": "s1", "tool_name": "Bash"})
+    await d._handle_message({
+        "event": "add", "hook": "Stop", "session_id": "s1", "project": "p", "message": "x",
+    })
+    assert d._session_states["s1"]["state"] == "idle"
+
+
+# --- PostToolUseFailure → confused (a tool genuinely errored) ---
+
+
+@pytest.mark.asyncio
+async def test_post_tool_use_failure_sets_confused():
+    d = make_daemon()
+    d._session_states["s1"] = {"state": "working", "last_event": time.time(), "tool_name": "Read"}
+    await d._handle_message({"event": "tool_failed", "session_id": "s1", "tool_name": "Read"})
+    assert d._session_states["s1"]["state"] == "confused"
+
+
+@pytest.mark.asyncio
+async def test_tool_failed_does_not_create_missing_session():
+    """A late PostToolUseFailure after SessionEnd must not resurrect a phantom session."""
+    d = make_daemon()
+    await d._handle_message({"event": "tool_failed", "session_id": "ghost", "tool_name": "Read"})
+    assert "ghost" not in d._session_states
+
+
+@pytest.mark.asyncio
+async def test_tool_failed_confused_clears_on_prompt_submit():
+    d = make_daemon()
+    await d._handle_message({"event": "tool_failed", "session_id": "s1", "tool_name": "Read"})
+    await d._handle_message({"event": "dismiss", "hook": "UserPromptSubmit", "session_id": "s1"})
+    assert d._session_states["s1"]["state"] == "thinking"
+
+
+@pytest.mark.asyncio
+async def test_tool_failed_does_not_create_notification_card():
+    """A tool failure is a transient state change, not a persistent notification card."""
+    d = make_daemon()
+    d._active_notifications.clear()
+    await d._handle_message({"event": "tool_failed", "session_id": "s1", "tool_name": "Read"})
+    assert "s1" not in d._active_notifications
 
 
 def test_idle_session_keeps_own_anim_when_notifications_active():

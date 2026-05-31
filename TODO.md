@@ -24,6 +24,68 @@ Custom app icon. Proactive BLE reconnection with full state sync on disconnect.
 
 ---
 
+## Code-review hardening (attention-hooks branch) — Complete
+
+Multi-agent review of the attention-hooks work surfaced 15 findings; fixes:
+
+- [x] **Don't staleness-evict `waiting` sessions** — a session blocked on AskUserQuestion/
+  PermissionRequest emits no events, so time-based eviction wrongly dropped the alert
+  while the user was away. Now excluded from staleness eviction; PID-liveness still
+  evicts a dead Claude process.
+- [x] **Installer self-heals / prunes superseded groups** — `install_hooks()` now drops our
+  OWN prior hook groups before re-appending the current config, so a changed matcher
+  no longer leaves a stale wildcard group firing on every tool. `are_hooks_installed()`
+  reports outdated when a leftover our-group sits under an unexpected matcher.
+- [x] **Installer crash-guard + precise command match** — tolerates malformed `{"hooks": null}`
+  groups (no TypeError); matches our notify command by exact-path/prefix, not substring
+  (a user wrapper containing the path is no longer mistaken for ours).
+- [x] **`waiting` outranks subagents** — a session with active subagents that hits a
+  permission/question prompt now shows the alert instead of being masked by `conducting`.
+- [x] **No phantom resurrection** — `permission`/`tool_failed` no longer create a missing
+  session (matches `tool_done`), so a late event after SessionEnd can't revive a ghost.
+- [x] **v1 alert priority** — on v1 transports `alert` (needs-you) now outranks working/
+  thinking instead of being buried.
+- [x] **Cleanup** — shared `ASK_USER_QUESTION_TOOL` constant (single source of truth),
+  `_enter_state` helper removes the copy-paste state branches, `sim_main.c` `--capture-anim`
+  learns `alert`, and a cross-validation test guards NOTIFY_SCRIPT↔protocol.py drift.
+- Verified NOT defects / accepted limitations: the `alert` sprite loops seamlessly
+  (frame 39 ≈ frame 0 — captured and checked), so no firmware change; a PermissionRequest
+  alert may persist into the approved tool's run (no "granted" hook exists in Claude Code);
+  `tool_failed` intentionally reuses the `confused` animation.
+
+## "Waiting for input" alert + PostToolUse — Complete
+
+- [x] **AskUserQuestion → waiting/alert** — When Claude shows the multiple-choice
+  dialog (`AskUserQuestion` tool), its `PreToolUse` now maps to a distinct
+  `waiting` session state that renders the `alert` Clawd animation, instead of the
+  generic `typing` it shared with real work. Claude is blocked on the human, so it
+  now looks like it.
+- [x] **PostToolUse hook (scoped to AskUserQuestion)** — New `PostToolUse` hook,
+  registered with `matcher: "AskUserQuestion"` to keep device event/BLE traffic
+  minimal. Emits a `tool_done` daemon event that clears the `waiting` alert back to
+  `thinking` the moment the user answers. The daemon-side handler is generic, so the
+  matcher can be broadened later with zero code change.
+- [x] **`alert` anim string parsing** — Added `"alert"` → `CLAWD_ANIM_ALERT` to both
+  `ble_service.c` and `sim_ble_parse.c` `parse_anim_name()` (it was previously
+  unmapped). v1 transports map the `alert` anim to the `confused` needs-attention
+  status. Notify script version bumped to `2026-05-30-posttooluse` (auto-reinstalls).
+- [x] **Non-clobbering hook installer** — `install_hooks()` now MERGES our hooks into
+  the user's Claude Code settings instead of `dict.update()` replacing whole event
+  keys. For each event+matcher we manage, our hook group is appended only if absent;
+  the user's own hooks (and other settings keys) are never modified or removed.
+  Idempotent. `are_hooks_installed()` is now matcher-aware so a new/changed matcher is
+  correctly detected as outdated. (`tests/test_hooks_install.py`, 12 tests.)
+- [x] **PermissionRequest → waiting/alert** — When Claude is blocked waiting for the
+  user to approve a tool, the session enters the same `waiting`/`alert` state as
+  AskUserQuestion. No "granted" hook exists and `PreToolUse` precedes it, so the alert
+  clears on the next `tool_use`/`Stop`/`UserPromptSubmit`. Fires only when a permission
+  dialog actually appears (auto-approved tools don't trigger it).
+- [x] **PostToolUseFailure → confused** — A genuine tool error (not a non-zero shell
+  exit) maps to the `confused` state — a transient "that didn't work" snag, lighter
+  than the API-error `error`/dizzy state. No notification card; clears on the next
+  event. Both new hooks reuse existing states/animations — no firmware/v1 changes.
+  Notify script version → `2026-05-30-permission-toolfailure`.
+
 ## Working Animations (v1.1.0) — Complete
 
 - [x] **Session state tracking in daemon** — `dict[session_id → state]` with `_compute_display_state()` priority resolution. States: registered → thinking → working → idle → confused. Display priority: working_N > thinking > confused > idle > sleeping.

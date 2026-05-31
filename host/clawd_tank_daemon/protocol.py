@@ -4,6 +4,12 @@ import json
 from pathlib import Path
 from typing import Optional
 
+# Built-in tool whose PreToolUse means "Claude is blocked on a human choice".
+# Single source of truth shared by the daemon (state mapping) and the hook
+# installer (PostToolUse matcher). Kept here in the shared message module so
+# both clawd_tank_daemon and clawd_tank_menubar can import it.
+ASK_USER_QUESTION_TOOL = "AskUserQuestion"
+
 
 def hook_payload_to_daemon_message(hook: dict) -> Optional[dict]:
     """Convert a Claude Code hook stdin payload to a daemon message.
@@ -31,6 +37,33 @@ def hook_payload_to_daemon_message(hook: dict) -> Optional[dict]:
     if event_name == "PreToolUse":
         return {
             "event": "tool_use",
+            "session_id": session_id,
+            "tool_name": hook.get("tool_name", ""),
+            "project": project,
+            "pid": pid,
+        }
+
+    if event_name == "PostToolUse":
+        return {
+            "event": "tool_done",
+            "session_id": session_id,
+            "tool_name": hook.get("tool_name", ""),
+            "project": project,
+            "pid": pid,
+        }
+
+    if event_name == "PermissionRequest":
+        return {
+            "event": "permission",
+            "session_id": session_id,
+            "tool_name": hook.get("tool_name", ""),
+            "project": project,
+            "pid": pid,
+        }
+
+    if event_name == "PostToolUseFailure":
+        return {
+            "event": "tool_failed",
             "session_id": session_id,
             "tool_name": hook.get("tool_name", ""),
             "project": project,
@@ -132,13 +165,16 @@ def hook_payload_to_daemon_message(hook: dict) -> Optional[dict]:
 def daemon_message_to_ble_payload(msg: dict) -> Optional[str]:
     """Convert a daemon message to a JSON string for BLE GATT write.
 
-    Returns None for session-internal events (session_start, tool_use, compact,
-    subagent_start, subagent_stop) that have no BLE representation.
-    Raises ValueError for unknown events.
+    Returns None for session-internal events (session_start, tool_use, tool_done,
+    permission, tool_failed, compact, subagent_start, subagent_stop) that have no
+    BLE representation. Raises ValueError for unknown events.
     """
     event = msg["event"]
 
-    if event in ("session_start", "tool_use", "compact", "subagent_start", "subagent_stop"):
+    if event in (
+        "session_start", "tool_use", "tool_done", "permission", "tool_failed",
+        "compact", "subagent_start", "subagent_stop",
+    ):
         return None
 
     if event == "add":
@@ -176,13 +212,17 @@ def display_state_to_v1_payload(state: dict) -> str:
     """Convert display state dict to legacy v1 set_status payload."""
     if "status" in state:
         return json.dumps({"action": "set_status", "status": state["status"]})
+    anims = state.get("anims", [])
     WORKING_ANIMS = {"typing", "building", "debugger", "wizard", "conducting", "beacon"}
-    working = sum(1 for a in state.get("anims", []) if a in WORKING_ANIMS)
-    if working > 0:
+    working = sum(1 for a in anims if a in WORKING_ANIMS)
+    if "alert" in anims:
+        # "needs your input" is the most actionable signal — outrank busy work.
+        status = "confused"
+    elif working > 0:
         status = f"working_{min(working, 3)}"
-    elif "thinking" in state.get("anims", []):
+    elif "thinking" in anims:
         status = "thinking"
-    elif any(a in ("confused", "dizzy") for a in state.get("anims", [])):
+    elif any(a in ("confused", "dizzy") for a in anims):
         status = "confused"
     else:
         status = "idle"

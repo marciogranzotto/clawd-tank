@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from clawd_tank_menubar.hooks import NOTIFY_SCRIPT
+from clawd_tank_daemon.protocol import hook_payload_to_daemon_message
 
 
 def _make_sock_path() -> str:
@@ -135,7 +136,85 @@ def test_notify_script_session_end_includes_reason(tmp_path):
 def test_notify_script_irrelevant_hook_sends_nothing(tmp_path):
     sock_path = _make_sock_path()
     msg = _run_script_with_payload({
-        "hook_event_name": "PostToolUse",  # not handled
+        "hook_event_name": "SomeUnhandledEvent",  # not handled
         "session_id": "s4",
     }, sock_path)
     assert msg == {}
+
+
+def test_notify_script_post_tool_use_produces_tool_done(tmp_path):
+    sock_path = _make_sock_path()
+    msg = _run_script_with_payload({
+        "hook_event_name": "PostToolUse",
+        "session_id": "s5",
+        "tool_name": "AskUserQuestion",
+        "cwd": str(tmp_path),
+    }, sock_path)
+    assert msg.get("event") == "tool_done"
+    assert msg.get("session_id") == "s5"
+    assert msg.get("tool_name") == "AskUserQuestion"
+    assert isinstance(msg.get("pid"), int)
+
+
+def test_notify_script_permission_request_produces_permission(tmp_path):
+    sock_path = _make_sock_path()
+    msg = _run_script_with_payload({
+        "hook_event_name": "PermissionRequest",
+        "session_id": "s6",
+        "tool_name": "Bash",
+        "cwd": str(tmp_path),
+    }, sock_path)
+    assert msg.get("event") == "permission"
+    assert msg.get("session_id") == "s6"
+    assert msg.get("tool_name") == "Bash"
+    assert isinstance(msg.get("pid"), int)
+
+
+def test_notify_script_post_tool_use_failure_produces_tool_failed(tmp_path):
+    sock_path = _make_sock_path()
+    msg = _run_script_with_payload({
+        "hook_event_name": "PostToolUseFailure",
+        "session_id": "s7",
+        "tool_name": "Read",
+        "cwd": str(tmp_path),
+    }, sock_path)
+    assert msg.get("event") == "tool_failed"
+    assert msg.get("session_id") == "s7"
+    assert msg.get("tool_name") == "Read"
+    assert isinstance(msg.get("pid"), int)
+
+
+# --- Cross-validate the embedded script against the daemon-side converter ---
+# The NOTIFY_SCRIPT is stdlib-only and cannot import protocol.py, so the two
+# hook->message mappings are duplicated and must stay in sync. This guards drift.
+
+_CROSS_CHECK_HOOKS = [
+    {"hook_event_name": "SessionStart", "session_id": "s", "cwd": "/x/proj", "source": "startup"},
+    {"hook_event_name": "PreToolUse", "session_id": "s", "cwd": "/x/proj", "tool_name": "Bash"},
+    {"hook_event_name": "PostToolUse", "session_id": "s", "cwd": "/x/proj", "tool_name": "AskUserQuestion"},
+    {"hook_event_name": "PermissionRequest", "session_id": "s", "cwd": "/x/proj", "tool_name": "Bash"},
+    {"hook_event_name": "PostToolUseFailure", "session_id": "s", "cwd": "/x/proj", "tool_name": "Read"},
+    {"hook_event_name": "PreCompact", "session_id": "s", "cwd": "/x/proj"},
+    {"hook_event_name": "Stop", "session_id": "s", "cwd": "/x/proj"},
+    {"hook_event_name": "StopFailure", "session_id": "s", "cwd": "/x/proj", "error": "boom"},
+    {"hook_event_name": "Notification", "notification_type": "idle_prompt",
+     "session_id": "s", "cwd": "/x/proj", "message": "m"},
+    {"hook_event_name": "UserPromptSubmit", "session_id": "s", "cwd": "/x/proj"},
+    {"hook_event_name": "SessionEnd", "session_id": "s", "cwd": "/x/proj", "reason": "logout"},
+    {"hook_event_name": "SubagentStart", "session_id": "s", "cwd": "/x/proj", "agent_id": "a"},
+    {"hook_event_name": "SubagentStop", "session_id": "s", "cwd": "/x/proj", "agent_id": "a"},
+]
+
+
+@pytest.mark.parametrize("hook", _CROSS_CHECK_HOOKS,
+                         ids=[h["hook_event_name"] for h in _CROSS_CHECK_HOOKS])
+def test_notify_script_matches_protocol_converter(hook):
+    """The embedded NOTIFY_SCRIPT must emit the same daemon message as the daemon-side
+    protocol.hook_payload_to_daemon_message (modulo pid, which the script computes from
+    the process tree while protocol reads it from the payload)."""
+    sock_path = _make_sock_path()
+    script_msg = _run_script_with_payload(hook, sock_path)
+    proto_msg = hook_payload_to_daemon_message(hook) or {}
+    script_msg.pop("pid", None)
+    proto_msg = {k: v for k, v in proto_msg.items() if k != "pid"}
+    assert script_msg == proto_msg

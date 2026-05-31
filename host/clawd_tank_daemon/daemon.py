@@ -12,7 +12,12 @@ from pathlib import Path
 from typing import Optional, Protocol, runtime_checkable
 
 from .ble_client import ClawdBleClient
-from .protocol import daemon_message_to_ble_payload, display_state_to_ble_payload, display_state_to_v1_payload
+from .protocol import (
+    ASK_USER_QUESTION_TOOL,
+    daemon_message_to_ble_payload,
+    display_state_to_ble_payload,
+    display_state_to_v1_payload,
+)
 from .sim_client import SimClient, SIM_DEFAULT_PORT
 from .socket_server import SocketServer
 from .transport import TransportClient
@@ -188,7 +193,7 @@ class ClawdDaemon:
             pass
 
         extra = ""
-        if event == "tool_use":
+        if event in ("tool_use", "tool_done", "permission", "tool_failed"):
             extra = f" tool={msg.get('tool_name', '?')}"
         elif event in ("subagent_start", "subagent_stop"):
             extra = f" agent={msg.get('agent_id', '?')[:12]}"
@@ -310,11 +315,14 @@ class ClawdDaemon:
                 continue
             session_subagents = state.get("subagents", set())
 
-            if state["state"] == "working" or session_subagents:
-                if session_subagents:
-                    anims.append("conducting")
-                else:
-                    anims.append(_tool_to_anim(state.get("tool_name", "")))
+            if state["state"] == "waiting":
+                # "needs you" is the most actionable signal — outrank the subagent
+                # 'conducting' indicator so a blocked session is never masked.
+                anims.append("alert")
+            elif session_subagents:
+                anims.append("conducting")
+            elif state["state"] == "working":
+                anims.append(_tool_to_anim(state.get("tool_name", "")))
             elif state["state"] == "thinking":
                 anims.append("thinking")
             elif state["state"] == "confused":
@@ -332,6 +340,21 @@ class ClawdDaemon:
         if len(self._session_order) > 4:
             result["overflow"] = len(self._session_order) - 4
         return result
+
+    def _enter_state(
+        self, session_id: str, state: str, tool_name: str, now: float, *, create: bool,
+    ) -> None:
+        """Set a session's state/tool_name/last_event. When create is False and the
+        session does not exist, do nothing (avoids resurrecting an ended session)."""
+        s = self._session_states.get(session_id)
+        if s is None:
+            if not create:
+                return
+            s = {"last_event": now}
+            self._session_states[session_id] = s
+        s["state"] = state
+        s["tool_name"] = tool_name
+        s["last_event"] = now
 
     def _update_session_state(
         self, event: str, hook: str, session_id: str,
@@ -353,10 +376,32 @@ class ClawdDaemon:
         if event == "session_start":
             self._session_states[session_id] = {"state": "registered", "last_event": now}
         elif event == "tool_use":
-            self._session_states.setdefault(session_id, {"state": "working", "last_event": now})
-            self._session_states[session_id]["state"] = "working"
-            self._session_states[session_id]["tool_name"] = tool_name
-            self._session_states[session_id]["last_event"] = now
+            # AskUserQuestion blocks on a human choice — surface it as a distinct
+            # "waiting" state (alert animation), not as ordinary work. PreToolUse is a
+            # session's first signal in some flows, so it may create the session.
+            new_state = "waiting" if tool_name == ASK_USER_QUESTION_TOOL else "working"
+            self._enter_state(session_id, new_state, tool_name, now, create=True)
+        elif event == "tool_done":
+            # PostToolUse (registered scoped to AskUserQuestion): the user answered,
+            # so clear the waiting alert and let Claude resume thinking. Never creates
+            # a session — a PostToolUse with no prior PreToolUse is ignored.
+            cur_s = self._session_states.get(session_id)
+            if cur_s is not None:
+                if tool_name == ASK_USER_QUESTION_TOOL and cur_s["state"] == "waiting":
+                    cur_s["state"] = "thinking"
+                cur_s["last_event"] = now
+        elif event == "permission":
+            # PermissionRequest: Claude is blocked waiting for the human to approve a
+            # tool. Same "needs you" semantics as AskUserQuestion → waiting/alert. No
+            # "granted" hook exists, so this clears on the next tool_use/Stop/prompt.
+            # PreToolUse always precedes a real permission prompt, so never create a
+            # missing session — a late event must not resurrect an ended one.
+            self._enter_state(session_id, "waiting", tool_name, now, create=False)
+        elif event == "tool_failed":
+            # PostToolUseFailure: a tool genuinely errored (not a non-zero shell exit).
+            # A transient "that didn't work" snag → confused, lighter than the API-error
+            # 'error' state. No notification card; never resurrects an ended session.
+            self._enter_state(session_id, "confused", tool_name, now, create=False)
         elif event == "compact":
             if session_id in self._session_states:
                 self._session_states[session_id]["last_event"] = now
@@ -418,7 +463,11 @@ class ClawdDaemon:
         now_mono = time.monotonic()
         stale = [
             sid for sid, s in self._session_states.items()
-            if now_mono - s.get("last_event_monotonic", now_mono) > self._session_staleness_timeout
+            # 'waiting' sessions are blocked on the human and legitimately emit no
+            # events; time-based eviction would drop the alert while the user is away.
+            # A dead Claude process is still caught by the PID-liveness checker.
+            if s.get("state") != "waiting"
+            and now_mono - s.get("last_event_monotonic", now_mono) > self._session_staleness_timeout
         ]
         for sid in stale:
             logger.info("Evicting stale session: %s", sid[:12])
