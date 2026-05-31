@@ -45,7 +45,17 @@ Custom app icon. Proactive BLE reconnection with full state sync on disconnect.
   keys. For each event+matcher we manage, our hook group is appended only if absent;
   the user's own hooks (and other settings keys) are never modified or removed.
   Idempotent. `are_hooks_installed()` is now matcher-aware so a new/changed matcher is
-  correctly detected as outdated. (`tests/test_hooks_install.py`, 11 tests.)
+  correctly detected as outdated. (`tests/test_hooks_install.py`, 12 tests.)
+- [x] **PermissionRequest → waiting/alert** — When Claude is blocked waiting for the
+  user to approve a tool, the session enters the same `waiting`/`alert` state as
+  AskUserQuestion. No "granted" hook exists and `PreToolUse` precedes it, so the alert
+  clears on the next `tool_use`/`Stop`/`UserPromptSubmit`. Fires only when a permission
+  dialog actually appears (auto-approved tools don't trigger it).
+- [x] **PostToolUseFailure → confused** — A genuine tool error (not a non-zero shell
+  exit) maps to the `confused` state — a transient "that didn't work" snag, lighter
+  than the API-error `error`/dizzy state. No notification card; clears on the next
+  event. Both new hooks reuse existing states/animations — no firmware/v1 changes.
+  Notify script version → `2026-05-30-permission-toolfailure`.
 
 ## Working Animations (v1.1.0) — Complete
 

@@ -188,7 +188,7 @@ class ClawdDaemon:
             pass
 
         extra = ""
-        if event in ("tool_use", "tool_done"):
+        if event in ("tool_use", "tool_done", "permission", "tool_failed"):
             extra = f" tool={msg.get('tool_name', '?')}"
         elif event in ("subagent_start", "subagent_stop"):
             extra = f" agent={msg.get('agent_id', '?')[:12]}"
@@ -370,6 +370,22 @@ class ClawdDaemon:
                 if tool_name == "AskUserQuestion" and cur_s["state"] == "waiting":
                     cur_s["state"] = "thinking"
                 cur_s["last_event"] = now
+        elif event == "permission":
+            # PermissionRequest: Claude is blocked waiting for the human to approve a
+            # tool. Same "needs you" semantics as AskUserQuestion → waiting/alert. No
+            # "granted" hook exists, so this clears on the next tool_use/Stop/prompt.
+            self._session_states.setdefault(session_id, {"state": "waiting", "last_event": now})
+            self._session_states[session_id]["state"] = "waiting"
+            self._session_states[session_id]["tool_name"] = tool_name
+            self._session_states[session_id]["last_event"] = now
+        elif event == "tool_failed":
+            # PostToolUseFailure: a tool genuinely errored (not a non-zero shell exit).
+            # A transient "that didn't work" snag → confused, lighter than the API-error
+            # 'error' state. No notification card; clears on the next event.
+            self._session_states.setdefault(session_id, {"state": "confused", "last_event": now})
+            self._session_states[session_id]["state"] = "confused"
+            self._session_states[session_id]["tool_name"] = tool_name
+            self._session_states[session_id]["last_event"] = now
         elif event == "compact":
             if session_id in self._session_states:
                 self._session_states[session_id]["last_event"] = now

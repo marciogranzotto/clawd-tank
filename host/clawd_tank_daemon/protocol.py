@@ -46,6 +46,24 @@ def hook_payload_to_daemon_message(hook: dict) -> Optional[dict]:
             "pid": pid,
         }
 
+    if event_name == "PermissionRequest":
+        return {
+            "event": "permission",
+            "session_id": session_id,
+            "tool_name": hook.get("tool_name", ""),
+            "project": project,
+            "pid": pid,
+        }
+
+    if event_name == "PostToolUseFailure":
+        return {
+            "event": "tool_failed",
+            "session_id": session_id,
+            "tool_name": hook.get("tool_name", ""),
+            "project": project,
+            "pid": pid,
+        }
+
     if event_name == "PreCompact":
         return {
             "event": "compact",
@@ -142,12 +160,15 @@ def daemon_message_to_ble_payload(msg: dict) -> Optional[str]:
     """Convert a daemon message to a JSON string for BLE GATT write.
 
     Returns None for session-internal events (session_start, tool_use, tool_done,
-    compact, subagent_start, subagent_stop) that have no BLE representation.
-    Raises ValueError for unknown events.
+    permission, tool_failed, compact, subagent_start, subagent_stop) that have no
+    BLE representation. Raises ValueError for unknown events.
     """
     event = msg["event"]
 
-    if event in ("session_start", "tool_use", "tool_done", "compact", "subagent_start", "subagent_stop"):
+    if event in (
+        "session_start", "tool_use", "tool_done", "permission", "tool_failed",
+        "compact", "subagent_start", "subagent_stop",
+    ):
         return None
 
     if event == "add":

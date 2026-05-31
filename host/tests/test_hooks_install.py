@@ -110,6 +110,22 @@ def test_install_preserves_user_postooluse_with_different_matcher(settings_path)
     assert any(HOOK_COMMAND in h["command"] for h in our_group["hooks"])
 
 
+def test_install_preserves_user_no_matcher_hook_on_permissionrequest(settings_path):
+    """Real-world case: a user's own no-matcher PermissionRequest hook (e.g. a
+    third-party tool) must survive — ours is appended as a separate group."""
+    settings_path.write_text(json.dumps({
+        "hooks": {
+            "PermissionRequest": [
+                {"hooks": [{"type": "command", "command": "/opt/other-tool/hook.sh"}]}
+            ]
+        }
+    }))
+    install_hooks()
+    cmds = _commands_for(_read(settings_path), "PermissionRequest")
+    assert "/opt/other-tool/hook.sh" in cmds, "user's PermissionRequest hook was clobbered"
+    assert any(HOOK_COMMAND in c for c in cmds), "our PermissionRequest hook was not added"
+
+
 def test_install_preserves_user_command_sharing_a_group(settings_path):
     """If the user shares a group with us, re-install keeps theirs and ours once."""
     settings_path.write_text(json.dumps({

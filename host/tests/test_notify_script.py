@@ -153,3 +153,31 @@ def test_notify_script_post_tool_use_produces_tool_done(tmp_path):
     assert msg.get("session_id") == "s5"
     assert msg.get("tool_name") == "AskUserQuestion"
     assert isinstance(msg.get("pid"), int)
+
+
+def test_notify_script_permission_request_produces_permission(tmp_path):
+    sock_path = _make_sock_path()
+    msg = _run_script_with_payload({
+        "hook_event_name": "PermissionRequest",
+        "session_id": "s6",
+        "tool_name": "Bash",
+        "cwd": str(tmp_path),
+    }, sock_path)
+    assert msg.get("event") == "permission"
+    assert msg.get("session_id") == "s6"
+    assert msg.get("tool_name") == "Bash"
+    assert isinstance(msg.get("pid"), int)
+
+
+def test_notify_script_post_tool_use_failure_produces_tool_failed(tmp_path):
+    sock_path = _make_sock_path()
+    msg = _run_script_with_payload({
+        "hook_event_name": "PostToolUseFailure",
+        "session_id": "s7",
+        "tool_name": "Read",
+        "cwd": str(tmp_path),
+    }, sock_path)
+    assert msg.get("event") == "tool_failed"
+    assert msg.get("session_id") == "s7"
+    assert msg.get("tool_name") == "Read"
+    assert isinstance(msg.get("pid"), int)

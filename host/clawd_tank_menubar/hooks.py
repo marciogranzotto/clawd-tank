@@ -23,7 +23,7 @@ NOTIFY_SCRIPT = textwrap.dedent('''\
     Reads hook payload from stdin, converts it to a daemon message,
     and forwards it via Unix socket. No external dependencies.
     """
-    # NOTIFY_SCRIPT_VERSION: 2026-05-30-posttooluse
+    # NOTIFY_SCRIPT_VERSION: 2026-05-30-permission-toolfailure
 
     import json
     import os
@@ -94,6 +94,12 @@ NOTIFY_SCRIPT = textwrap.dedent('''\
 
         if event_name == "PostToolUse":
             return {"event": "tool_done", "session_id": session_id, "tool_name": hook.get("tool_name", ""), "project": project, "pid": pid}
+
+        if event_name == "PermissionRequest":
+            return {"event": "permission", "session_id": session_id, "tool_name": hook.get("tool_name", ""), "project": project, "pid": pid}
+
+        if event_name == "PostToolUseFailure":
+            return {"event": "tool_failed", "session_id": session_id, "tool_name": hook.get("tool_name", ""), "project": project, "pid": pid}
 
         if event_name == "PreCompact":
             return {"event": "compact", "session_id": session_id, "pid": pid}
@@ -220,6 +226,14 @@ HOOKS_CONFIG = {
             "matcher": "AskUserQuestion",
             "hooks": [{"type": "command", "command": HOOK_COMMAND}],
         }
+    ],
+    # Claude is blocked waiting for the user to approve a tool → waiting/alert.
+    "PermissionRequest": [
+        {"hooks": [{"type": "command", "command": HOOK_COMMAND}]}
+    ],
+    # A tool genuinely errored (not a non-zero shell exit) → confused.
+    "PostToolUseFailure": [
+        {"hooks": [{"type": "command", "command": HOOK_COMMAND}]}
     ],
     "PreCompact": [
         {"hooks": [{"type": "command", "command": HOOK_COMMAND}]}

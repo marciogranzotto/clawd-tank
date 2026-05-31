@@ -645,3 +645,53 @@ def test_display_state_to_v1_alert_maps_to_confused():
     payload = display_state_to_v1_payload(state)
     parsed = json.loads(payload)
     assert parsed["status"] == "confused"
+
+
+# --- PermissionRequest (waiting/alert) and PostToolUseFailure (confused) ---
+
+
+def test_permission_request_produces_permission_event():
+    hook = {
+        "hook_event_name": "PermissionRequest",
+        "session_id": "p1",
+        "tool_name": "Bash",
+        "cwd": "/x/proj",
+    }
+    msg = hook_payload_to_daemon_message(hook)
+    assert msg is not None
+    assert msg["event"] == "permission"
+    assert msg["tool_name"] == "Bash"
+
+
+def test_permission_request_includes_pid():
+    hook = {
+        "hook_event_name": "PermissionRequest",
+        "session_id": "p1",
+        "tool_name": "Bash",
+        "pid": 4242,
+    }
+    msg = hook_payload_to_daemon_message(hook)
+    assert msg is not None
+    assert msg["pid"] == 4242
+
+
+def test_post_tool_use_failure_produces_tool_failed_event():
+    hook = {
+        "hook_event_name": "PostToolUseFailure",
+        "session_id": "f1",
+        "tool_name": "Read",
+        "cwd": "/x/proj",
+    }
+    msg = hook_payload_to_daemon_message(hook)
+    assert msg is not None
+    assert msg["event"] == "tool_failed"
+    assert msg["tool_name"] == "Read"
+
+
+def test_permission_and_tool_failed_produce_no_ble_payload():
+    assert daemon_message_to_ble_payload(
+        {"event": "permission", "session_id": "s", "tool_name": "Bash"}
+    ) is None
+    assert daemon_message_to_ble_payload(
+        {"event": "tool_failed", "session_id": "s", "tool_name": "Read"}
+    ) is None
