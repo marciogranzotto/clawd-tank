@@ -12,7 +12,7 @@ jobs:
   build:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Fetch LVGL (managed component not in git)
         run: |
@@ -35,7 +35,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -82,13 +82,13 @@ jobs:
           rm -rf dmg-staging
 
       - name: Upload DMG as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Clawd-Tank-macOS
           path: host/dist/Clawd-Tank.dmg
 
       - name: Upload DMG to release
         if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: host/dist/Clawd-Tank.dmg
