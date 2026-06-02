@@ -12,6 +12,10 @@ NOTIFICATION_CHR_UUID = "71ffb137-8b7a-47c9-9a7a-4b1b16662d9a"
 CONFIG_CHR_UUID = "e9f6e626-5fca-4201-b80c-4d2b51c40f51"
 VERSION_CHR_UUID = "b6dc9a5b-5041-4b32-9f8d-34321df8637c"
 SCAN_INTERVAL_SECS = 5
+# Upper bound for a single GATT read. bleak's CoreBluetooth backend has its own
+# (much longer, ~20s) read timeout, but on a stale-connected dead link that long
+# hold blocks every other GATT op behind _lock and delays reconnect. Fail fast.
+GATT_READ_TIMEOUT_SECS = 5.0
 
 
 class ClawdBleClient:
@@ -23,6 +27,9 @@ class ClawdBleClient:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._on_disconnect_cb = on_disconnect_cb
         self._on_connect_cb = on_connect_cb
+        # Collapses the proactive drop (_handle_disconnect) and bleak's own
+        # disconnected_callback into a single notification per connection.
+        self._disconnect_notified = False
 
     @property
     def is_connected(self) -> bool:
@@ -50,6 +57,7 @@ class ClawdBleClient:
                 )
                 await client.connect()
                 self._client = client
+                self._disconnect_notified = False  # re-arm for this connection
                 logger.info("Connected to Clawd Tank (MTU: %d)", client.mtu_size)
                 if self._on_connect_cb:
                     self._on_connect_cb()
@@ -63,16 +71,28 @@ class ClawdBleClient:
         logger.warning("Disconnected from Clawd Tank")
         if self._loop is not None and self._loop.is_running():
             self._loop.call_soon_threadsafe(self._clear_client)
+            self._loop.call_soon_threadsafe(self._notify_disconnect)
         else:
             self._clear_client()
-        if self._on_disconnect_cb:
-            if self._loop is not None and self._loop.is_running():
-                self._loop.call_soon_threadsafe(self._on_disconnect_cb)
-            else:
-                self._on_disconnect_cb()
+            self._notify_disconnect()
 
     def _clear_client(self) -> None:
         self._client = None
+
+    def _notify_disconnect(self) -> None:
+        """Fire the disconnect callback at most once per connection.
+
+        A proactive drop (_handle_disconnect, after a write/read/probe failure)
+        and bleak's own disconnected_callback (_on_disconnect) can both fire for
+        the same physical disconnect. This guard collapses them so the daemon —
+        and the menu bar icon — sees a single disconnect. The guard is re-armed
+        on the next successful connect().
+        """
+        if self._disconnect_notified:
+            return
+        self._disconnect_notified = True
+        if self._on_disconnect_cb:
+            self._on_disconnect_cb()
 
     async def _handle_disconnect(self) -> None:
         """Force-drop the bleak client after an op failure and notify."""
@@ -83,8 +103,7 @@ class ClawdBleClient:
                 await client.disconnect()
             except Exception:
                 pass
-        if self._on_disconnect_cb:
-            self._on_disconnect_cb()
+        self._notify_disconnect()
 
     async def ensure_connected(self) -> None:
         """Reconnect if disconnected."""
@@ -129,18 +148,59 @@ class ClawdBleClient:
                 await self._handle_disconnect()
                 return {}
 
+    async def _read_version_char(self) -> bytes:
+        """Lock-guarded, timeout-bounded read of the version characteristic.
+
+        Shared by read_version() and ping() so the version round-trip lives in
+        one place. The lock serializes it with writes and with a concurrent
+        read of the same characteristic (bleak keys in-flight read futures by
+        characteristic handle, so overlapping reads would clobber each other).
+        Raises if the link is down; on a read failure it drops the client (so
+        the sender re-scans) and re-raises.
+        """
+        async with self._lock:
+            if not self.is_connected:
+                raise ConnectionError("BLE link not connected")
+            try:
+                return await asyncio.wait_for(
+                    self._client.read_gatt_char(VERSION_CHR_UUID),
+                    timeout=GATT_READ_TIMEOUT_SECS,
+                )
+            except Exception as e:
+                logger.warning("BLE version read failed: %s", e)
+                await self._handle_disconnect()
+                raise
+
     async def read_version(self) -> int:
-        """Read protocol version from firmware. Returns 1 if characteristic absent."""
-        if not self.is_connected:
-            return 1
+        """Read protocol version from firmware. Returns 1 if characteristic
+        absent, unreadable, or the link is down."""
         try:
-            data = await self._client.read_gatt_char(VERSION_CHR_UUID)
+            data = await self._read_version_char()
+        except Exception:
+            return 1  # not connected, or read failed (client already dropped)
+        try:
             return int(data.decode("utf-8").strip())
         except ValueError:
             return 1  # payload wasn't a number — firmware speaks v1
+
+    async def ping(self) -> bool:
+        """Active liveness probe: a round-trip GATT read that proves the link.
+
+        macOS CoreBluetooth frequently fails to fire ``disconnected_callback``
+        when the link is lost to range or sleep, and notification writes use
+        ``response=False`` (no ACK), so a dead link never surfaces as an error.
+        ``is_connected`` therefore stays stale-True and the sender's reconnect
+        branch is never taken. This probe forces a round-trip; on failure it
+        drops the client (clearing ``is_connected``) and fires the disconnect
+        callback, which is what makes the sender re-scan and reconnect.
+
+        Returns True if the link round-trips, False otherwise.
+        """
+        try:
+            await self._read_version_char()
+            return True
         except Exception:
-            await self._handle_disconnect()
-            return 1
+            return False
 
     async def write_config(self, payload: str) -> bool:
         """Write a partial config JSON to the config characteristic.
