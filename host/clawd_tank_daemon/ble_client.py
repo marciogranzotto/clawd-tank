@@ -142,6 +142,30 @@ class ClawdBleClient:
             await self._handle_disconnect()
             return 1
 
+    async def ping(self) -> bool:
+        """Active liveness probe: a round-trip GATT read that proves the link.
+
+        macOS CoreBluetooth frequently fails to fire ``disconnected_callback``
+        when the link is lost to range or sleep, and notification writes use
+        ``response=False`` (no ACK), so a dead link never surfaces as an error.
+        ``is_connected`` therefore stays stale-True and the sender's reconnect
+        branch is never taken. This probe forces a round-trip; on failure it
+        drops the client (clearing ``is_connected``) and fires the disconnect
+        callback, which is what makes the sender re-scan and reconnect.
+
+        Returns True if the link round-trips, False otherwise.
+        """
+        async with self._lock:
+            if not self.is_connected:
+                return False
+            try:
+                await self._client.read_gatt_char(VERSION_CHR_UUID)
+                return True
+            except Exception as e:
+                logger.warning("BLE liveness probe failed: %s", e)
+                await self._handle_disconnect()
+                return False
+
     async def write_config(self, payload: str) -> bool:
         """Write a partial config JSON to the config characteristic.
 

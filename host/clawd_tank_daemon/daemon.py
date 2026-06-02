@@ -50,6 +50,10 @@ def _tool_to_anim(tool_name: str) -> str:
 PID_PATH = Path.home() / ".clawd-tank" / "daemon.pid"
 LOCK_PATH = Path.home() / ".clawd-tank" / "daemon.lock"
 PID_DEDUP_FRESHNESS_SECONDS = 60.0
+# How often to actively probe BLE links for liveness. macOS CoreBluetooth often
+# never reports range/sleep disconnects, so without this probe a dead link is
+# never detected and the daemon never re-scans. Detection lag ~= this interval.
+BLE_LIVENESS_INTERVAL_SECS = 20.0
 
 
 @runtime_checkable
@@ -548,6 +552,33 @@ class ClawdDaemon:
             if evicted:
                 await self._broadcast_display_state_if_changed()
 
+    async def _probe_ble_liveness(self) -> None:
+        """One liveness sweep: round-trip probe every connected, probe-capable
+        transport. A failed probe drops the client inside ping(), which flips
+        is_connected to False so _transport_sender re-scans and reconnects. TCP
+        transports (the simulator) detect disconnects natively and expose no
+        ping(), so they are skipped via duck typing."""
+        for name, transport in list(self._transports.items()):
+            probe = getattr(transport, "ping", None)
+            if probe is None or not transport.is_connected:
+                continue
+            try:
+                alive = await probe()
+                if not alive:
+                    logger.warning(
+                        "Transport '%s' liveness probe failed; sender will reconnect",
+                        name,
+                    )
+            except Exception:
+                logger.exception("Transport '%s' liveness probe raised", name)
+
+    async def _ble_liveness_checker(self) -> None:
+        """Async task: periodically probe BLE links so dead connections that
+        CoreBluetooth never reported are detected and reconnected."""
+        while self._running:
+            await asyncio.sleep(BLE_LIVENESS_INTERVAL_SECS)
+            await self._probe_ble_liveness()
+
     def set_session_timeout(self, seconds: int) -> None:
         self._session_staleness_timeout = float(seconds)
         logger.info("Session staleness timeout set to %ds", seconds)
@@ -684,6 +715,13 @@ class ClawdDaemon:
             except asyncio.CancelledError:
                 pass
 
+        if hasattr(self, '_ble_liveness_task'):
+            self._ble_liveness_task.cancel()
+            try:
+                await self._ble_liveness_task
+            except asyncio.CancelledError:
+                pass
+
         for task in self._sender_tasks.values():
             task.cancel()
         for task in self._sender_tasks.values():
@@ -782,6 +820,7 @@ class ClawdDaemon:
 
         self._staleness_task = asyncio.create_task(self._staleness_checker())
         self._liveness_task = asyncio.create_task(self._liveness_checker())
+        self._ble_liveness_task = asyncio.create_task(self._ble_liveness_checker())
 
         await self._shutdown_event.wait()
         logger.info("Daemon run() finished")
