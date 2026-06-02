@@ -55,8 +55,11 @@ firebase-debug.log
 host/clawd_tank_menubar/_version_info.py
 .gitnexus
 
-# Claude Code local state
-.claude/
+# Claude Code local state — ignore worktrees/settings/tool-generated skills,
+# but track authored project skills (e.g. .claude/skills/releasing).
+.claude/*
+!.claude/skills/
+.claude/skills/gitnexus/
 
 # One-off / personal docs
 gifs/
