@@ -551,6 +551,32 @@ async def test_probe_ble_liveness_dead_link_clears_connection():
 
 
 @pytest.mark.asyncio
+async def test_probe_ble_liveness_skips_transport_removed_mid_sweep():
+    """If a transport is removed (BLE disabled in the menu bar) while an earlier
+    probe in the same sweep is awaiting, the removed one must not be probed."""
+    daemon = ClawdDaemon()
+
+    second = AsyncMock()
+    second.is_connected = True
+    second.ping = AsyncMock(return_value=True)
+
+    async def first_ping():
+        daemon._transports.pop("second", None)  # removed mid-sweep
+        return True
+
+    first = AsyncMock()
+    first.is_connected = True
+    first.ping = first_ping
+
+    daemon._transports["first"] = first
+    daemon._transports["second"] = second
+
+    await daemon._probe_ble_liveness()
+
+    second.ping.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_remove_transport_cancels_sender_and_disconnects():
     """remove_transport cancels sender task and disconnects client."""
     daemon = ClawdDaemon()

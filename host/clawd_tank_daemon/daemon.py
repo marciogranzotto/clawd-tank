@@ -559,6 +559,10 @@ class ClawdDaemon:
         transports (the simulator) detect disconnects natively and expose no
         ping(), so they are skipped via duck typing."""
         for name, transport in list(self._transports.items()):
+            # A prior probe's await may have let remove_transport() run; don't
+            # probe a transport that was disabled mid-sweep.
+            if name not in self._transports:
+                continue
             probe = getattr(transport, "ping", None)
             if probe is None or not transport.is_connected:
                 continue
