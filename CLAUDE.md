@@ -12,14 +12,24 @@ Three components: **firmware** (ESP-IDF C), **simulator** (native macOS), **host
 
 ### Firmware (ESP-IDF 5.3.2)
 
-Environment is managed via direnv (`firmware/.envrc`). ESP-IDF path: `bsp/esp-idf/`.
+ESP-IDF path: `bsp/esp-idf/`.
 
 ```bash
+# One-time setup — install the RISC-V toolchain
+cd bsp/esp-idf && ./install.sh esp32c6   # or install.fish for fish shell
+
+# Activate ESP-IDF environment (required each new terminal)
+source bsp/esp-idf/export.sh             # bash/zsh
+# source bsp/esp-idf/export.fish         # fish
+
+# Set target (once per clean build dir)
+cd firmware && idf.py set-target esp32c6
+
 # Build
 cd firmware && idf.py build
 
-# Flash + monitor
-cd firmware && idf.py -p /dev/ttyACM0 flash monitor
+# Flash + monitor (Ctrl+] to exit monitor)
+cd firmware && idf.py -p /dev/cu.usbmodemXXXX flash monitor
 
 # Clean
 cd firmware && idf.py fullclean

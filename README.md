@@ -83,12 +83,23 @@ See [simulator/README.md](simulator/README.md) for full CLI reference and JSON s
 
 ### Firmware
 
-Requires [ESP-IDF 5.3.2](https://docs.espressif.com/projects/esp-idf/en/v5.3.2/esp32c6/get-started/index.html) (bundled in `bsp/esp-idf/`, activated via direnv).
+Requires [ESP-IDF 5.3.2](https://docs.espressif.com/projects/esp-idf/en/v5.3.2/esp32c6/get-started/index.html) (bundled in `bsp/esp-idf/`).
 
 ```bash
+# One-time setup — install the RISC-V toolchain
+cd bsp/esp-idf && ./install.sh esp32c6   # or install.fish for fish shell
+
+# Activate ESP-IDF environment (required each new terminal)
+source bsp/esp-idf/export.sh             # bash/zsh
+# source bsp/esp-idf/export.fish         # fish
+
+# Set target and build
 cd firmware
+idf.py set-target esp32c6
 idf.py build
-idf.py -p /dev/ttyACM0 flash monitor
+
+# Flash + monitor (Ctrl+] to exit monitor)
+idf.py -p /dev/cu.usbmodemXXXX flash monitor
 ```
 
 ### macOS Menu Bar App
