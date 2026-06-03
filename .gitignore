@@ -32,6 +32,10 @@ host/.eggs/
 # Simulator build artifacts
 simulator/build/
 simulator/build-static/
+simulator/build-win/
+
+# Downloaded dependencies
+simulator/SDL2-*.tar.gz
 
 # Firmware test binaries
 firmware/test/test_rle_decode

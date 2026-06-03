@@ -9,12 +9,31 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdatomic.h>
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+#pragma comment(lib, "ws2_32.lib")
+typedef SOCKET socket_t;
+#define SOCK_INVALID INVALID_SOCKET
+#define sock_close closesocket
+#define sock_errno WSAGetLastError()
+#define SHUT_RDWR SD_BOTH
+typedef int socklen_t;
+#else
 #include <unistd.h>
-#include <pthread.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <errno.h>
+typedef int socket_t;
+#define SOCK_INVALID (-1)
+#define sock_close close
+#define sock_errno errno
+#endif
+
+#include <pthread.h>
 
 /* ---- Thread-safe event queue ---- */
 #define EVT_QUEUE_SIZE 16
@@ -95,8 +114,8 @@ static volatile bool s_pending_config_update = false;
 static atomic_bool s_query_pending = false;
 
 /* ---- TCP listener thread ---- */
-static int s_listen_fd = -1;
-static int s_client_fd = -1;  /* current client, for shutdown */
+static socket_t s_listen_fd = SOCK_INVALID;
+static socket_t s_client_fd = SOCK_INVALID;  /* current client, for shutdown */
 static pthread_mutex_t s_client_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_t s_thread;
 static bool s_thread_started = false;
@@ -167,7 +186,7 @@ static void handle_window_action(const char *buf, uint16_t len) {
     cJSON_Delete(json);
 }
 
-static void handle_client(int client_fd) {
+static void handle_client(socket_t client_fd) {
     printf("[tcp] Client connected\n");
 
     /* Prevent SIGPIPE crash on macOS when client disconnects during send() */
@@ -236,14 +255,18 @@ static void handle_client(int client_fd) {
     }
 
     pthread_mutex_lock(&s_client_mutex);
-    s_client_fd = -1;
+    s_client_fd = SOCK_INVALID;
     pthread_mutex_unlock(&s_client_mutex);
 
     printf("[tcp] Client disconnected\n");
-    ble_evt_t disconnect_evt = { .type = BLE_EVT_DISCONNECTED };
-    queue_push(&disconnect_evt);
+    /* Note: we do NOT send BLE_EVT_DISCONNECTED here.
+     * The Windows hook script opens a new TCP connection for each event
+     * (short-lived connections), so treating TCP close as "disconnect"
+     * would flash the BLE icon after every single hook invocation.
+     * Instead, the display state is driven entirely by set_sessions /
+     * set_status actions from the hook. */
 
-    close(client_fd);
+    sock_close(client_fd);
 }
 
 static void *listener_thread(void *arg) {
@@ -253,10 +276,10 @@ static void *listener_thread(void *arg) {
     while (s_running) {
         struct sockaddr_in client_addr;
         socklen_t addr_len = sizeof(client_addr);
-        int client_fd = accept(s_listen_fd, (struct sockaddr *)&client_addr, &addr_len);
-        if (client_fd < 0) {
+        socket_t client_fd = accept(s_listen_fd, (struct sockaddr *)&client_addr, &addr_len);
+        if (client_fd == SOCK_INVALID) {
             if (s_running) {
-                printf("[tcp] Accept error: %s\n", strerror(errno));
+                printf("[tcp] Accept error\n");
             }
             continue;
         }
@@ -270,32 +293,39 @@ static void *listener_thread(void *arg) {
 /* ---- Public API ---- */
 
 int sim_socket_init(int port) {
+#ifdef _WIN32
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        fprintf(stderr, "[tcp] WSAStartup failed\n");
+        return -1;
+    }
+#endif
     s_listen_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (s_listen_fd < 0) {
-        fprintf(stderr, "[tcp] Failed to create socket: %s\n", strerror(errno));
+    if (s_listen_fd == SOCK_INVALID) {
+        fprintf(stderr, "[tcp] Failed to create socket\n");
         return -1;
     }
 
     int opt = 1;
-    setsockopt(s_listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    setsockopt(s_listen_fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt));
 
-    struct sockaddr_in addr = {
-        .sin_family = AF_INET,
-        .sin_port = htons((uint16_t)port),
-        .sin_addr.s_addr = htonl(INADDR_LOOPBACK),
-    };
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((uint16_t)port);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 
     if (bind(s_listen_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        fprintf(stderr, "[tcp] Failed to bind port %d: %s\n", port, strerror(errno));
-        close(s_listen_fd);
-        s_listen_fd = -1;
+        fprintf(stderr, "[tcp] Failed to bind port %d\n", port);
+        sock_close(s_listen_fd);
+        s_listen_fd = SOCK_INVALID;
         return -1;
     }
 
     if (listen(s_listen_fd, 1) < 0) {
-        fprintf(stderr, "[tcp] Failed to listen: %s\n", strerror(errno));
-        close(s_listen_fd);
-        s_listen_fd = -1;
+        fprintf(stderr, "[tcp] Failed to listen\n");
+        sock_close(s_listen_fd);
+        s_listen_fd = SOCK_INVALID;
         return -1;
     }
 
@@ -304,8 +334,8 @@ int sim_socket_init(int port) {
 
     if (pthread_create(&s_thread, NULL, listener_thread, NULL) != 0) {
         fprintf(stderr, "[tcp] Failed to create listener thread\n");
-        close(s_listen_fd);
-        s_listen_fd = -1;
+        sock_close(s_listen_fd);
+        s_listen_fd = SOCK_INVALID;
         s_running = false;
         return -1;
     }
@@ -356,7 +386,7 @@ bool sim_socket_send_event(const char *json_line) {
     buf[len] = '\n';
 
     pthread_mutex_lock(&s_client_mutex);
-    if (s_client_fd < 0) {
+    if (s_client_fd == SOCK_INVALID) {
         pthread_mutex_unlock(&s_client_mutex);
         if (heap) free(buf);
         return false;
@@ -371,19 +401,23 @@ void sim_socket_shutdown(void) {
     s_running = false;
     /* Close the client socket to unblock recv() in handle_client */
     pthread_mutex_lock(&s_client_mutex);
-    if (s_client_fd >= 0) {
+    if (s_client_fd != SOCK_INVALID) {
         shutdown(s_client_fd, SHUT_RDWR);
-        s_client_fd = -1;
+        sock_close(s_client_fd);
+        s_client_fd = SOCK_INVALID;
     }
     pthread_mutex_unlock(&s_client_mutex);
     /* Close listen socket to unblock accept() in listener_thread */
-    if (s_listen_fd >= 0) {
+    if (s_listen_fd != SOCK_INVALID) {
         shutdown(s_listen_fd, SHUT_RDWR);
-        close(s_listen_fd);
-        s_listen_fd = -1;
+        sock_close(s_listen_fd);
+        s_listen_fd = SOCK_INVALID;
     }
     if (s_thread_started) {
         pthread_join(s_thread, NULL);
     }
     printf("[tcp] Shut down\n");
+#ifdef _WIN32
+    WSACleanup();
+#endif
 }
