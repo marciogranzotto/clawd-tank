@@ -288,7 +288,16 @@ python tools/png2rgb565.py /tmp/frames/ firmware/main/assets/sprite_thinking.h -
 
 # Record seamlessly-looping GIFs of all animations (for docs)
 python tools/record_gif.py --all assets/captures/
+
+# Transparent GIFs of every SVG (README gallery + Slack emoji)
+python tools/svg2slack_emoji.py
+
+# Telegram video custom emoji (100x100 WebM/VP9, ≤3s, ≤64KB; needs ffmpeg)
+python tools/svg2telegram_emoji.py
+TELEGRAM_BOT_TOKEN=... python tools/telegram_emoji_pack.py   # creates the pack
 ```
+
+The Telegram pack is at [t.me/addemoji/clawd_tank_by_clawdtanktestbot](https://t.me/addemoji/clawd_tank_by_clawdtanktestbot) (using custom emoji needs Telegram Premium).
 
 ## BLE Debugging
 

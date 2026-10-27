@@ -24,6 +24,17 @@ Custom app icon. Proactive BLE reconnection with full state sync on disconnect.
 
 ---
 
+## Telegram custom emoji pack — Complete
+
+- [x] **`tools/svg2telegram_emoji.py`** — renders every SVG to a 100x100 VP9 WebM with alpha
+  (`assets/telegram-emojis/`). Loops over 3s: whole loop sped up (≤1.5x), else the longest
+  seamless sub-loop, else compressed into 3s.
+- [x] **`tools/telegram_emoji_pack.py`** — creates the pack via Bot API `createNewStickerSet`
+  (owner auto-detected from the bot's latest `/start`). Pack:
+  [clawd_tank_by_clawdtanktestbot](https://t.me/addemoji/clawd_tank_by_clawdtanktestbot), 32 emoji.
+- Measured: custom emoji are capped at 64 KiB, not the 256 KB the stickers page lists.
+- Sleeping, builder and hat-mishap had no seamless sub-loop and play 2–2.3x fast.
+
 ## README Animation Gallery — Complete
 
 - [x] **Exhaustive animation gallery** — README lists all 19 on-device animations (with their
